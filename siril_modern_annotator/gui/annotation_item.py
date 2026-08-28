@@ -170,13 +170,24 @@ class MarkerItem(QGraphicsObject):
                 px, py = cx + ox, cy + oy
                 painter.drawLine(QPointF(px, py), QPointF(px + hx * arm, py + hy * arm))
                 painter.drawLine(QPointF(px, py), QPointF(px + vx * arm, py + vy * arm))
+        elif style.shape is MarkerShape.ELLIPSE:
+            painter.save()
+            painter.rotate(geo.rotation_deg)
+            painter.drawEllipse(QPointF(0.0, 0.0), geo.radius_x, geo.radius_y)
+            painter.restore()
 
         if self.selected_:
             sel_pen = QPen(_SELECTION_COLOR, max(1.0, style.stroke_width))
             sel_pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(sel_pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(QPointF(cx, cy), r + 5, r + 5)
+            if style.shape is MarkerShape.ELLIPSE:
+                painter.save()
+                painter.rotate(geo.rotation_deg)
+                painter.drawEllipse(QPointF(0.0, 0.0), geo.radius_x + 5, geo.radius_y + 5)
+                painter.restore()
+            else:
+                painter.drawEllipse(QPointF(cx, cy), r + 5, r + 5)
 
     def mousePressEvent(self, event):
         self.clicked.emit()

@@ -10,6 +10,7 @@ scale factor differ.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Callable
 
@@ -54,8 +55,15 @@ class LabelGeometry:
 class MarkerGeometry:
     x: float
     y: float
+    # Circular-equivalent radius: max(radius_x, radius_y) for ELLIPSE, otherwise equal
+    # to both. Used by the "attached, skip the connector" distance check and as a
+    # bounding-box radius, both of which stay correct for ELLIPSE too since that max is
+    # always >= the true bounding box at any rotation (see _ellipse_anchor_point).
     radius: float
     style: MarkerStyle
+    radius_x: float
+    radius_y: float
+    rotation_deg: float
 
 
 def resolve_marker_color(
@@ -94,14 +102,25 @@ def compute_marker_geometry(
     style = ann.effective_marker_style(global_style)
     style = replace(style, color=resolve_marker_color(ann, global_style, catalog_colors))
     radius = style.radius
-    if style.size_from_angular_size and ann.angular_size and arcsec_per_px:
+    # ELLIPSE is manual-only (see MarkerStyle.radius_x's docstring) -- skip the
+    # angular-size auto-scaling entirely rather than applying it to a field
+    # (radius_x/radius_y) style.size_from_angular_size doesn't even describe.
+    if style.shape is not MarkerShape.ELLIPSE and style.size_from_angular_size and ann.angular_size and arcsec_per_px:
         # angular_size is in arcmin (RESEARCH.md local-catalog schema); convert to px.
         angular_radius_arcsec = (ann.angular_size * 60.0) / 2.0
         radius = max(radius, angular_radius_arcsec / arcsec_per_px)
         if max_radius_px is not None:
             radius = min(radius, max_radius_px)
     x, y = ann.effective_marker_position()
-    return MarkerGeometry(x=x, y=y, radius=radius, style=style)
+    if style.shape is MarkerShape.ELLIPSE:
+        radius_x, radius_y = style.radius_x, style.radius_y
+        radius = max(radius_x, radius_y)
+    else:
+        radius_x = radius_y = radius
+    return MarkerGeometry(
+        x=x, y=y, radius=radius, style=style,
+        radius_x=radius_x, radius_y=radius_y, rotation_deg=style.rotation_deg if style.shape is MarkerShape.ELLIPSE else 0.0,
+    )
 
 
 _FALLBACK_LABEL_BACKGROUND_COLOR = "#101015"
@@ -183,6 +202,9 @@ def compute_connector_points(
     if marker.style.shape is MarkerShape.BRACKETS:
         off_x, off_y = _bracket_anchor_point(marker.radius, ux, uy)
         start = (marker.x + off_x, marker.y + off_y)
+    elif marker.style.shape is MarkerShape.ELLIPSE:
+        off_x, off_y = _ellipse_anchor_point(marker.radius_x, marker.radius_y, marker.rotation_deg, ux, uy)
+        start = (marker.x + off_x, marker.y + off_y)
     else:
         start = (marker.x + marker.radius * ux, marker.y + marker.radius * uy)
 
@@ -232,6 +254,36 @@ def _bracket_anchor_point(radius: float, ux: float, uy: float) -> tuple[float, f
         y = _clamp_to_drawn(y)
     else:  # crossed a horizontal (top/bottom) edge -- x is the free axis
         x = _clamp_to_drawn(x)
+    return (x, y)
+
+
+def _ellipse_anchor_point(
+    radius_x: float, radius_y: float, rotation_deg: float, ux: float, uy: float
+) -> tuple[float, float]:
+    """Where an ELLIPSE marker's connector should actually start, relative to the
+    marker's own center -- the point where the marker->label ray exits the (possibly
+    rotated) ellipse boundary, so the connector always touches the drawn oval exactly
+    rather than assuming a circular radius (a real, confirmed bug for a differently
+    non-circular shape: see _bracket_anchor_point above).
+
+    Rotates the ray direction into the ellipse's own unrotated frame (inverse of the
+    rotation gui/annotation_item.py's paint() and export/exporter.py's _draw_marker
+    apply when actually drawing it -- both must agree with this for the connector to
+    land on the visible edge), solves for the standard axis-aligned ellipse boundary
+    there, then rotates the resulting point back."""
+    if radius_x <= 0 or radius_y <= 0 or (ux == 0 and uy == 0):
+        return (0.0, 0.0)
+    theta = math.radians(rotation_deg)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    local_ux = ux * cos_t + uy * sin_t
+    local_uy = -ux * sin_t + uy * cos_t
+    denom = (local_ux / radius_x) ** 2 + (local_uy / radius_y) ** 2
+    if denom <= 0:
+        return (0.0, 0.0)
+    t = 1.0 / math.sqrt(denom)
+    local_x, local_y = t * local_ux, t * local_uy
+    x = local_x * cos_t - local_y * sin_t
+    y = local_x * sin_t + local_y * cos_t
     return (x, y)
 
 

@@ -14,6 +14,7 @@ functions in annotation/renderer.py, guaranteeing identical placement.
 from __future__ import annotations
 
 import logging
+import math
 import platform
 from dataclasses import dataclass
 from pathlib import Path
@@ -226,6 +227,29 @@ def _scaled(pt: tuple[float, float], scale: float) -> tuple[float, float]:
     return pt[0] * scale, pt[1] * scale
 
 
+def _draw_rotated_ellipse_outline(
+    draw: ImageDraw.ImageDraw,
+    cx: float, cy: float,
+    radius_x: float, radius_y: float,
+    rotation_deg: float,
+    color: tuple[int, int, int, int],
+    width: int,
+) -> None:
+    theta = math.radians(rotation_deg)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    steps = 72
+    points = []
+    for i in range(steps + 1):
+        a = 2 * math.pi * i / steps
+        local_x, local_y = radius_x * math.cos(a), radius_y * math.sin(a)
+        points.append((
+            cx + local_x * cos_t - local_y * sin_t,
+            cy + local_x * sin_t + local_y * cos_t,
+        ))
+    for p0, p1 in zip(points, points[1:]):
+        draw.line([p0[0], p0[1], p1[0], p1[1]], fill=color, width=width)
+
+
 def _draw_marker(draw: ImageDraw.ImageDraw, marker, scale: float) -> None:
     style = marker.style
     if style.shape is MarkerShape.NONE:
@@ -259,6 +283,15 @@ def _draw_marker(draw: ImageDraw.ImageDraw, marker, scale: float) -> None:
             px, py = cx + ox, cy + oy
             draw.line([px, py, px + hx * arm, py + hy * arm], fill=color, width=width)
             draw.line([px, py, px + vx * arm, py + vy * arm], fill=color, width=width)
+    elif style.shape is MarkerShape.ELLIPSE:
+        # Pillow's ImageDraw.ellipse() only draws axis-aligned ellipses -- no rotation
+        # support -- so a rotated oval is approximated as a closed polyline around its
+        # true (rotated) boundary instead, same "manual line segments" approach
+        # BRACKETS above already uses for a shape Pillow has no primitive for.
+        _draw_rotated_ellipse_outline(
+            draw, cx, cy, marker.radius_x * scale, marker.radius_y * scale,
+            marker.rotation_deg, color, width,
+        )
 
 
 def _draw_label(draw: ImageDraw.ImageDraw, label, scale: float) -> None:

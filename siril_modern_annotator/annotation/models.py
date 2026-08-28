@@ -18,6 +18,7 @@ class MarkerShape(str, Enum):
     RETICLE = "reticle"
     DOT = "dot"
     NONE = "none"
+    ELLIPSE = "ellipse"
 
 
 class BackgroundMode(str, Enum):
@@ -47,6 +48,13 @@ class MarkerStyle:
     radius: float = 14.0
     opacity: float = 0.9
     size_from_angular_size: bool = False
+    # Only meaningful when shape is ELLIPSE (per-object only -- brief: fit an elongated
+    # galaxy inside a customized oval). Deliberately manual-only, unlike radius above:
+    # size_from_angular_size never applies to these, since the catalogs this app reads
+    # from carry no position angle to auto-orient an ellipse with anyway.
+    radius_x: float = 20.0
+    radius_y: float = 12.0
+    rotation_deg: float = 0.0
 
 
 @dataclass

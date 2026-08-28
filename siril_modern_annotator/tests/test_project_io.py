@@ -32,7 +32,10 @@ def _sample_project() -> ProjectData:
             object_type="galaxy", magnitude=3.4, angular_size=178.0,
             marker_x=1210.0, marker_y=805.0,
             label_x=1250.0, label_y=770.0, manually_positioned=True,
-            marker_style=MarkerStyle(shape=MarkerShape.BRACKETS, color="#ff0000"),
+            marker_style=MarkerStyle(
+                shape=MarkerShape.ELLIPSE, color="#ff0000",
+                radius_x=45.0, radius_y=18.0, rotation_deg=32.0,
+            ),
             label_style=LabelStyle(background_mode=BackgroundMode.SOLID, name_display=NameDisplayMode.COMMON_ONLY),
             priority=5, locked=True,
         ),
@@ -83,8 +86,11 @@ def test_round_trip_preserves_annotation_fields(tmp_path: Path):
     assert m31.manually_positioned is True
     assert m31.locked is True
     assert m31.priority == 5
-    assert m31.marker_style.shape == MarkerShape.BRACKETS
+    assert m31.marker_style.shape == MarkerShape.ELLIPSE
     assert m31.marker_style.color == "#ff0000"
+    assert m31.marker_style.radius_x == 45.0
+    assert m31.marker_style.radius_y == 18.0
+    assert m31.marker_style.rotation_deg == 32.0
     assert m31.label_style.background_mode == BackgroundMode.SOLID
     assert m31.label_style.name_display == NameDisplayMode.COMMON_ONLY
 

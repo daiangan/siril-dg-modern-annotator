@@ -94,18 +94,24 @@ class StyleEditorWidget(QWidget):
 
     changed = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, allow_ellipse: bool = False):
         super().__init__(parent)
         layout = QVBoxLayout(self)
 
         marker_group = QGroupBox("Marker")
         marker_form = QFormLayout(marker_group)
         self.marker_shape = QComboBox()
-        # Per user request: only these two shapes are offered (Circle stays the
-        # default). The model/renderer still support every MarkerShape value --
-        # this only narrows what's newly selectable, so a project file saved before
-        # this restriction with a different shape still renders exactly as saved.
-        for shape in (MarkerShape.CIRCLE, MarkerShape.BRACKETS):
+        # Per user request: only these shapes are offered (Circle stays the default).
+        # The model/renderer still support every MarkerShape value -- this only
+        # narrows what's newly selectable, so a project file saved before this
+        # restriction with a different shape still renders exactly as saved. Ellipse
+        # is per-object only (brief: fit a specific irregular galaxy in a custom oval,
+        # not a sensible *default* shape for point-like objects) -- allow_ellipse is
+        # only True for the Selected Object tab's editor; see StylePanel.__init__.
+        shapes = (MarkerShape.CIRCLE, MarkerShape.BRACKETS)
+        if allow_ellipse:
+            shapes = shapes + (MarkerShape.ELLIPSE,)
+        for shape in shapes:
             self.marker_shape.addItem(shape.value.capitalize(), shape)
         self.marker_color = ColorButton()
         self.marker_stroke = DarkDoubleSpinBox()
@@ -113,6 +119,14 @@ class StyleEditorWidget(QWidget):
         self.marker_stroke.setSingleStep(0.2)
         self.marker_radius = DarkDoubleSpinBox()
         self.marker_radius.setRange(2.0, 500.0)
+        self.marker_radius_x = DarkDoubleSpinBox()
+        self.marker_radius_x.setRange(2.0, 500.0)
+        self.marker_radius_y = DarkDoubleSpinBox()
+        self.marker_radius_y.setRange(2.0, 500.0)
+        self.marker_rotation = DarkDoubleSpinBox()
+        self.marker_rotation.setRange(-180.0, 180.0)
+        self.marker_rotation.setSingleStep(5.0)
+        self.marker_rotation.setSuffix("°")
         self.marker_opacity = DarkDoubleSpinBox()
         self.marker_opacity.setRange(0.05, 1.0)
         self.marker_opacity.setSingleStep(0.05)
@@ -121,8 +135,12 @@ class StyleEditorWidget(QWidget):
         marker_form.addRow("Color", self.marker_color)
         marker_form.addRow("Stroke width", self.marker_stroke)
         marker_form.addRow("Radius", self.marker_radius)
+        marker_form.addRow("Radius X", self.marker_radius_x)
+        marker_form.addRow("Radius Y", self.marker_radius_y)
+        marker_form.addRow("Rotation", self.marker_rotation)
         marker_form.addRow("Opacity", self.marker_opacity)
         marker_form.addRow(self.marker_size_from_angular)
+        self._marker_form = marker_form
 
         label_group = QGroupBox("Label")
         label_form = QFormLayout(label_group)
@@ -204,16 +222,31 @@ class StyleEditorWidget(QWidget):
         layout.addStretch(1)
 
         self._connect_signals()
+        self._update_marker_shape_fields_visibility()
+
+    def _update_marker_shape_fields_visibility(self) -> None:
+        """Radius X/Y/Rotation only make sense for ELLIPSE; plain Radius and "Scale
+        with angular size" only make sense for every other shape (see MarkerStyle's
+        docstring on radius_x -- ellipse is deliberately manual-only). Hides rather
+        than disables, same reasoning as the Selected Object tab's Reset Position
+        button: an irrelevant control shouldn't sit there greyed out."""
+        is_ellipse = self.marker_shape.currentData() is MarkerShape.ELLIPSE
+        for row_widget in (self.marker_radius_x, self.marker_radius_y, self.marker_rotation):
+            self._marker_form.setRowVisible(row_widget, is_ellipse)
+        self._marker_form.setRowVisible(self.marker_radius, not is_ellipse)
+        self._marker_form.setRowVisible(self.marker_size_from_angular, not is_ellipse)
 
     def _connect_signals(self) -> None:
         widgets = [
-            self.marker_shape, self.marker_stroke, self.marker_radius, self.marker_opacity,
+            self.marker_shape, self.marker_stroke, self.marker_radius,
+            self.marker_radius_x, self.marker_radius_y, self.marker_rotation, self.marker_opacity,
             self.marker_size_from_angular, self.font_family, self.font_size, self.font_bold,
             self.font_italic, self.name_display, self.background_mode,
             self.background_color_inherit_check, self.background_opacity,
             self.padding, self.corner_radius, self.outline, self.shadow, self.glow,
             self.connector_enabled, self.connector_style, self.connector_width,
         ]
+        self.marker_shape.currentIndexChanged.connect(self._update_marker_shape_fields_visibility)
         for w in widgets:
             signal = getattr(w, "currentIndexChanged", None) or getattr(w, "valueChanged", None) or getattr(w, "toggled", None)
             if signal:
@@ -227,8 +260,12 @@ class StyleEditorWidget(QWidget):
         self.marker_color.set_color(marker.color)
         self.marker_stroke.setValue(marker.stroke_width)
         self.marker_radius.setValue(marker.radius)
+        self.marker_radius_x.setValue(marker.radius_x)
+        self.marker_radius_y.setValue(marker.radius_y)
+        self.marker_rotation.setValue(marker.rotation_deg)
         self.marker_opacity.setValue(marker.opacity)
         self.marker_size_from_angular.setChecked(marker.size_from_angular_size)
+        self._update_marker_shape_fields_visibility()
 
         self.font_family.setCurrentFont(QFont(label.font_family))
         self.font_size.setValue(label.font_size)
@@ -264,6 +301,9 @@ class StyleEditorWidget(QWidget):
             color=self.marker_color.hex_color,
             stroke_width=self.marker_stroke.value(),
             radius=self.marker_radius.value(),
+            radius_x=self.marker_radius_x.value(),
+            radius_y=self.marker_radius_y.value(),
+            rotation_deg=self.marker_rotation.value(),
             opacity=self.marker_opacity.value(),
             size_from_angular_size=self.marker_size_from_angular.isChecked(),
         )
@@ -339,7 +379,7 @@ class StylePanel(QWidget):
 
         self.tabs = QTabWidget()
         self.global_editor = StyleEditorWidget()
-        self.object_editor = StyleEditorWidget()
+        self.object_editor = StyleEditorWidget(allow_ellipse=True)
         self.object_tab = QWidget()
         object_tab_layout = QVBoxLayout(self.object_tab)
         self.object_placeholder = QLabel("No object selected.")
