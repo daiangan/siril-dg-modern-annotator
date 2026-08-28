@@ -178,6 +178,31 @@ QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {
     background-color: #232427;
 }
 
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #26272b;
+    border: 1px solid #3a3c41;
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    background: #3a6ea5;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: #4a7eb5;
+    border: 1px solid #5c8ec4;
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #5c8ec4;
+}
+
 QGroupBox {
     border: 1px solid #2c2d31;
     border-radius: 5px;

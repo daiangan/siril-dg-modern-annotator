@@ -18,9 +18,18 @@ only combination that reliably worked.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPolygonF
-from PyQt6.QtWidgets import QDoubleSpinBox, QSpinBox, QStyle, QStyleOptionSpinBox
+from PyQt6.QtWidgets import (
+    QDoubleSpinBox,
+    QHBoxLayout,
+    QLabel,
+    QSlider,
+    QSpinBox,
+    QStyle,
+    QStyleOptionSpinBox,
+    QWidget,
+)
 
 _ARROW_COLOR = QColor("#e6e6e6")
 _ARROW_COLOR_DISABLED = QColor("#5a5c61")
@@ -72,3 +81,52 @@ class DarkDoubleSpinBox(QDoubleSpinBox):
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         _paint_spin_arrows(self)
+
+
+class LabeledSlider(QWidget):
+    """A horizontal slider paired with a live value label -- used for the Ellipse
+    marker's Radius X / Radius Y / Rotation controls (per user report: clicking a
+    spinbox's tiny increment arrows repeatedly to visually fit an oval around a real
+    galaxy was uncomfortable; dragging a slider is the natural interaction for "adjust
+    this until it looks right"). Whole-unit (integer) precision only -- sub-pixel
+    radius or sub-degree rotation precision was never needed by the spinboxes this
+    replaces either (rotation's old step was 5.0), and QSlider itself is integer-only.
+
+    Exposes the same value()/setValue()/setRange()/valueChanged surface as
+    DarkDoubleSpinBox so StyleEditorWidget's existing load()/marker_style()/
+    _connect_signals() code (which was written against that surface) needed no special
+    casing to use this instead -- see _connect_signals()'s generic
+    getattr(w, "valueChanged", None) widget-signal detection."""
+
+    valueChanged = pyqtSignal(float)
+
+    def __init__(self, minimum: float, maximum: float, suffix: str = "", parent=None):
+        super().__init__(parent)
+        self._suffix = suffix
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(round(minimum), round(maximum))
+        self.value_label = QLabel()
+        self.value_label.setMinimumWidth(52)
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.slider, 1)
+        layout.addWidget(self.value_label)
+        self.slider.valueChanged.connect(self._on_slider_value_changed)
+        self._update_label(self.slider.value())
+
+    def _on_slider_value_changed(self, value: int) -> None:
+        self._update_label(value)
+        self.valueChanged.emit(float(value))
+
+    def _update_label(self, value: int) -> None:
+        self.value_label.setText(f"{value}{self._suffix}")
+
+    def value(self) -> float:
+        return float(self.slider.value())
+
+    def setValue(self, value: float) -> None:
+        self.slider.setValue(round(value))
+
+    def setRange(self, minimum: float, maximum: float) -> None:
+        self.slider.setRange(round(minimum), round(maximum))

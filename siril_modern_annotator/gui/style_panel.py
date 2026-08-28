@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..annotation.catalogs import DEFAULT_CATALOG_COLORS, SUPPORTED_CATALOGS
-from .widgets import DarkDoubleSpinBox, DarkSpinBox
+from .widgets import DarkDoubleSpinBox, DarkSpinBox, LabeledSlider
 from ..annotation.models import (
     Annotation,
     BackgroundMode,
@@ -119,14 +119,16 @@ class StyleEditorWidget(QWidget):
         self.marker_stroke.setSingleStep(0.2)
         self.marker_radius = DarkDoubleSpinBox()
         self.marker_radius.setRange(2.0, 500.0)
-        self.marker_radius_x = DarkDoubleSpinBox()
-        self.marker_radius_x.setRange(2.0, 500.0)
-        self.marker_radius_y = DarkDoubleSpinBox()
-        self.marker_radius_y.setRange(2.0, 500.0)
-        self.marker_rotation = DarkDoubleSpinBox()
-        self.marker_rotation.setRange(-180.0, 180.0)
-        self.marker_rotation.setSingleStep(5.0)
-        self.marker_rotation.setSuffix("°")
+        # Sliders, not spinboxes: per user report, incrementing these via a spinbox's
+        # tiny arrows was uncomfortable, and dragging is the natural interaction for
+        # "adjust this oval until it visually fits the galaxy" anyway. 5000px comfortably
+        # covers a large galaxy's radius in native image pixel space on a real
+        # high-resolution astrophotography frame -- the previous 500 cap (copied from
+        # the circular Radius field above) left a real M31 ellipse unable to reach the
+        # galaxy's actual extent, per a real report with a screenshot.
+        self.marker_radius_x = LabeledSlider(2.0, 5000.0, suffix="px")
+        self.marker_radius_y = LabeledSlider(2.0, 5000.0, suffix="px")
+        self.marker_rotation = LabeledSlider(-180.0, 180.0, suffix="°")
         self.marker_opacity = DarkDoubleSpinBox()
         self.marker_opacity.setRange(0.05, 1.0)
         self.marker_opacity.setSingleStep(0.05)
