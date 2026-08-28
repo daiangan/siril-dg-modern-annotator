@@ -130,9 +130,39 @@ class MarkerItem(QGraphicsObject):
 
     def boundingRect(self) -> QRectF:
         geo = self._geometry()
-        pad = geo.style.stroke_width + 2
+        # Must stay a superset of shape() below, whose click-tolerance padding grows
+        # in scene units at low zoom (see _click_tolerance()) -- otherwise Qt's own
+        # contract (shape() must fit inside boundingRect()) breaks, and the scene's
+        # spatial index can stop even asking this item about clicks near its edge,
+        # silently undoing the zoom-aware fix at the exact zoom levels it's for.
+        pad = max(geo.style.stroke_width + 2, self._click_tolerance() + 2)
         r = geo.radius
         return QRectF(-r - pad, -r - pad, 2 * (r + pad), 2 * (r + pad))
+
+    # Constant on-screen click tolerance -- see _click_tolerance()'s docstring for why
+    # this must be screen-space, not a fixed scene/native-pixel amount.
+    _CLICK_TOLERANCE_SCREEN_PX = 14.0
+
+    def _click_tolerance(self) -> float:
+        """Scene-space equivalent of a constant ~14 screen pixels of click tolerance
+        around a marker's drawn line, so it stays comfortable to click regardless of
+        the current zoom level. A fixed *scene*-space tolerance (native image pixels)
+        looked generous at 100% zoom but became a near-invisible sliver on screen at
+        the zoom levels this app is normally used at to see a whole astrophoto (e.g.
+        "Fit", commonly 20-40%) -- confirmed real report that markers became nearly
+        unselectable (only their label still worked, and a marker that can't reliably
+        be pressed can't be dragged either) after shape() below stopped using the full
+        bounding square. Queries the actual QGraphicsView showing this item for its
+        current zoom (image_view.py applies zoom via QGraphicsView.scale(), uniformly
+        in x/y) rather than assuming any particular scale."""
+        scene = self.scene()
+        if scene is not None:
+            views = scene.views()
+            if views:
+                view_scale = views[0].transform().m11()
+                if view_scale > 0:
+                    return self._CLICK_TOLERANCE_SCREEN_PX / view_scale
+        return self._CLICK_TOLERANCE_SCREEN_PX
 
     def shape(self) -> QPainterPath:
         """Without this, Qt's default shape() is just boundingRect() as a filled
@@ -143,17 +173,18 @@ class MarkerItem(QGraphicsObject):
         even fully inside it, like NGC 206/M32 sitting inside M31's own marker) --
         made worse by Ellipse, whose bounding square is sized off max(radius_x,
         radius_y) regardless of how thin the actual oval is. This traces a path along
-        what's actually drawn and stroke-expands it by a generous click tolerance, so
-        only *near the visible line* is clickable, matching what a user would expect
-        from looking at the marker."""
+        what's actually drawn and stroke-expands it by _click_tolerance(), so only
+        *near the visible line* is clickable, matching what a user would expect from
+        looking at the marker."""
         geo = self._geometry()
         style = geo.style
         r = geo.radius
         if style.shape is MarkerShape.NONE:
             return QPainterPath()
+        tolerance = self._click_tolerance()
         if style.shape is MarkerShape.DOT:
             path = QPainterPath()
-            rad = max(1.5, style.stroke_width) + 4.0  # small filled dot: no ring-only stroking needed
+            rad = max(1.5, style.stroke_width) + tolerance  # small filled dot: no ring-only stroking needed
             path.addEllipse(QPointF(0.0, 0.0), rad, rad)
             return path
 
@@ -180,7 +211,7 @@ class MarkerItem(QGraphicsObject):
             path = QTransform().rotate(geo.rotation_deg).map(local)
 
         stroker = QPainterPathStroker()
-        stroker.setWidth(max(style.stroke_width + 10.0, 12.0))
+        stroker.setWidth(max(style.stroke_width + 4.0, 2 * tolerance))
         return stroker.createStroke(path)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
