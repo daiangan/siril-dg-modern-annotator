@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPainterPathStroker, QPen, QTransform
 from PyQt6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
@@ -133,6 +133,55 @@ class MarkerItem(QGraphicsObject):
         pad = geo.style.stroke_width + 2
         r = geo.radius
         return QRectF(-r - pad, -r - pad, 2 * (r + pad), 2 * (r + pad))
+
+    def shape(self) -> QPainterPath:
+        """Without this, Qt's default shape() is just boundingRect() as a filled
+        rectangle -- meaning the *entire* empty interior of an outline-only circle or
+        ellipse (this item never fills its interior, see paint() below) is clickable,
+        not just the drawn ring. Confirmed real report: a large marker's mostly-empty
+        bounding square was intercepting clicks meant for a smaller marker nearby (or
+        even fully inside it, like NGC 206/M32 sitting inside M31's own marker) --
+        made worse by Ellipse, whose bounding square is sized off max(radius_x,
+        radius_y) regardless of how thin the actual oval is. This traces a path along
+        what's actually drawn and stroke-expands it by a generous click tolerance, so
+        only *near the visible line* is clickable, matching what a user would expect
+        from looking at the marker."""
+        geo = self._geometry()
+        style = geo.style
+        r = geo.radius
+        if style.shape is MarkerShape.NONE:
+            return QPainterPath()
+        if style.shape is MarkerShape.DOT:
+            path = QPainterPath()
+            rad = max(1.5, style.stroke_width) + 4.0  # small filled dot: no ring-only stroking needed
+            path.addEllipse(QPointF(0.0, 0.0), rad, rad)
+            return path
+
+        path = QPainterPath()
+        if style.shape is MarkerShape.CIRCLE or style.shape is MarkerShape.RETICLE:
+            path.addEllipse(QPointF(0.0, 0.0), r, r)
+        elif style.shape is MarkerShape.CROSSHAIR:
+            path.moveTo(-r, 0.0)
+            path.lineTo(r, 0.0)
+            path.moveTo(0.0, -r)
+            path.lineTo(0.0, r)
+        elif style.shape is MarkerShape.BRACKETS:
+            arm = r * 0.5
+            corners = [(-r, -r), (r, -r), (r, r), (-r, r)]
+            directions = [((1, 0), (0, 1)), ((-1, 0), (0, 1)), ((-1, 0), (0, -1)), ((1, 0), (0, -1))]
+            for (ox, oy), ((hx, hy), (vx, vy)) in zip(corners, directions):
+                path.moveTo(ox, oy)
+                path.lineTo(ox + hx * arm, oy + hy * arm)
+                path.moveTo(ox, oy)
+                path.lineTo(ox + vx * arm, oy + vy * arm)
+        elif style.shape is MarkerShape.ELLIPSE:
+            local = QPainterPath()
+            local.addEllipse(QPointF(0.0, 0.0), geo.radius_x, geo.radius_y)
+            path = QTransform().rotate(geo.rotation_deg).map(local)
+
+        stroker = QPainterPathStroker()
+        stroker.setWidth(max(style.stroke_width + 10.0, 12.0))
+        return stroker.createStroke(path)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
         geo = self._geometry()
