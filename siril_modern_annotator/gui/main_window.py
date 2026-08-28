@@ -774,6 +774,12 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         hide_action = menu.addAction(f"Hide {name}")
         hide_action.triggered.connect(lambda: self._on_table_visibility_changed(ann.id, False))
+        # Only offered once the marker has actually been dragged off its WCS position --
+        # same condition as the Selected Object tab's Reset Position button (brief:
+        # give it a right-click entry there too, not just the Style panel button).
+        if ann.marker_x is not None:
+            reset_position_action = menu.addAction("Reset Position")
+            reset_position_action.triggered.connect(self._reset_selected_marker_position)
         menu.exec(screen_pos)
 
     def _on_object_double_clicked(self, annotation_id: str) -> None:
