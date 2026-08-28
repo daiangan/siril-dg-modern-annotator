@@ -82,9 +82,8 @@ def _default_text_measurer(text: str, style: LabelStyle) -> tuple[float, float]:
 
 
 def _marker_bbox(ann: Annotation, radius: float) -> BBox:
-    return BBox(
-        ann.image_x - radius, ann.image_y - radius, ann.image_x + radius, ann.image_y + radius
-    )
+    x, y = ann.effective_marker_position()
+    return BBox(x - radius, y - radius, x + radius, y + radius)
 
 
 def _candidate_bbox(cx: float, cy: float, direction: str, w: float, h: float) -> tuple[float, float, BBox]:
@@ -162,6 +161,7 @@ def auto_arrange(
         marker_box = _marker_bbox(ann, marker_radius)
         occupied.append(marker_box)
 
+        marker_x, marker_y = ann.effective_marker_position()
         best_score = None
         best_pos = None
         best_bbox = None
@@ -169,7 +169,7 @@ def auto_arrange(
         for ring in _DISTANCE_RING_GAP_MULTIPLIERS:
             radius = marker_radius + base_gap * ring
             for direction in _DIRECTIONS:
-                cx, cy = _anchor_point(ann.image_x, ann.image_y, direction, radius)
+                cx, cy = _anchor_point(marker_x, marker_y, direction, radius)
                 x, y, bbox = _candidate_bbox(cx, cy, direction, w, h)
                 overlap = sum(bbox.overlap_area(o) for o in occupied)
                 oob = bbox.out_of_bounds_area(image_width, image_height)

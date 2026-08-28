@@ -6,8 +6,9 @@ position" (see Annotation.effective_marker_position)."""
 
 from __future__ import annotations
 
+from siril_modern_annotator.annotation.layout import auto_arrange
 from siril_modern_annotator.annotation.models import Annotation, MarkerStyle, StylePreset
-from siril_modern_annotator.annotation.renderer import compute_marker_geometry
+from siril_modern_annotator.annotation.renderer import compute_label_geometry, compute_marker_geometry
 from siril_modern_annotator.gui.commands import MoveMarkerCommand
 
 
@@ -73,3 +74,26 @@ def test_reset_position_is_move_marker_command_to_none():
     assert ann.effective_marker_position() == (100.0, 200.0)  # back to the WCS position
     cmd.undo()
     assert (ann.marker_x, ann.marker_y) == (150.0, 250.0)
+
+
+def test_compute_label_geometry_default_position_follows_dragged_marker():
+    """Regression test for a real report ("Auto Arrange looks like it's not working"):
+    both auto_arrange and this "not yet arranged" default fallback anchored off
+    image_x/image_y directly, ignoring a marker_x/marker_y drag override -- so a
+    marker dragged before Auto Arrange (or Reset Layout) had ever run would default
+    its label right next to the marker's *original* WCS position, nowhere near where
+    the marker actually is now."""
+    ann = _ann(marker_x=900.0, marker_y=950.0)  # label_x/label_y still None
+    style = StylePreset(name="test")
+    label = compute_label_geometry(ann, style)
+    assert abs(label.bbox.x0 - 900.0) < 50
+    assert abs(label.bbox.y0 - 950.0) < 50
+
+
+def test_auto_arrange_anchors_to_dragged_marker_position():
+    ann = _ann(marker_x=1500.0, marker_y=1500.0)
+    style = StylePreset(name="test")
+    auto_arrange([ann], style, image_width=2000, image_height=2000)
+    dx = ann.label_x - 1500.0
+    dy = ann.label_y - 1500.0
+    assert (dx**2 + dy**2) ** 0.5 < 200, "label should hug the actual (dragged) marker, not the original WCS position"

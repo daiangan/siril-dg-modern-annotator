@@ -159,8 +159,13 @@ def compute_label_geometry(
     if ann.label_x is not None and ann.label_y is not None:
         x, y = ann.label_x, ann.label_y
     else:
-        # Not yet auto-arranged: default to just right of the marker.
-        x, y = ann.image_x + 14, ann.image_y - h / 2
+        # Not yet auto-arranged: default to just right of the marker's *actual*
+        # position -- effective_marker_position(), not image_x/image_y directly, or a
+        # marker dragged before Auto Arrange had ever run once would default its label
+        # next to the original WCS position instead of the marker itself (same bug
+        # class fixed in annotation/layout.py's auto_arrange, confirmed by a real report).
+        marker_x, marker_y = ann.effective_marker_position()
+        x, y = marker_x + 14, marker_y - h / 2
     return LabelGeometry(text=text, bbox=BBox(x, y, x + w, y + h), style=style)
 
 

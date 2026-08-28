@@ -47,6 +47,23 @@ def test_isolated_object_gets_a_label_near_its_marker():
     assert distance < 200  # should hug the marker, not fly off to a far corner
 
 
+def test_dragged_marker_position_is_used_not_the_original_wcs_position():
+    """Regression test for a real report ("Auto Arrange looks like it's not working"):
+    auto_arrange anchored label placement to image_x/image_y directly, ignoring
+    marker_x/marker_y (the manual marker-position override -- see
+    Annotation.effective_marker_position). For any object whose marker had been
+    dragged, the label landed near the marker's original position instead of where it
+    actually is now, making the label look completely disconnected from its marker."""
+    style = StylePreset(name="test")
+    ann = _make_annotation("Dragged", 500, 500)
+    ann.marker_x, ann.marker_y = 1500.0, 1500.0
+    auto_arrange([ann], style, image_width=2000, image_height=1500)
+    dx = ann.label_x - 1500.0
+    dy = ann.label_y - 1500.0
+    distance_from_dragged = (dx**2 + dy**2) ** 0.5
+    assert distance_from_dragged < 200, "label should hug the actual (dragged) marker position"
+
+
 def test_locked_annotation_is_not_moved():
     style = StylePreset(name="test")
     ann = _make_annotation("Locked", 800, 600)
