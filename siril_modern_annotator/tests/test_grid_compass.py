@@ -75,22 +75,30 @@ def test_choose_grid_step_handles_degenerate_fov():
 
 
 def test_format_ra_sexagesimal_known_values():
-    assert _format_ra_sexagesimal(0.0) == "00h00m00.0s"
-    assert _format_ra_sexagesimal(180.0) == "12h00m00.0s"
-    assert _format_ra_sexagesimal(360.0) == "00h00m00.0s"  # wraps
+    # Minutes precision only, per user request/example ("RA: 00h46m", no seconds).
+    assert _format_ra_sexagesimal(0.0) == "00h00m"
+    assert _format_ra_sexagesimal(180.0) == "12h00m"
+    assert _format_ra_sexagesimal(360.0) == "00h00m"  # wraps
+    assert _format_ra_sexagesimal(11.5) == "00h46m"  # 11.5deg / 15 = 0.7667h = 46m
 
 
 def test_format_dec_sexagesimal_known_values():
-    assert _format_dec_sexagesimal(0.0) == "+00°00′00.0″"
-    assert _format_dec_sexagesimal(30.5) == "+30°30′00.0″"
-    assert _format_dec_sexagesimal(-5.25) == "-05°15′00.0″"
+    # Minutes precision only, plain apostrophe, per user request/example ("+41 30'").
+    assert _format_dec_sexagesimal(0.0) == "+00°00'"
+    assert _format_dec_sexagesimal(30.5) == "+30°30'"
+    assert _format_dec_sexagesimal(-5.25) == "-05°15'"
 
 
-def test_format_sexagesimal_does_not_display_60_seconds():
-    """A naive %.1f on the seconds component can round up to "60.0s" for a value like
-    59.96 -- must carry into minutes instead."""
-    text = _format_ra_sexagesimal(0.0041666)  # ~59.96 seconds of RA time
-    assert "60.0s" not in text
+def test_format_sexagesimal_does_not_display_60_minutes():
+    """Rounding to the nearest minute (there's no seconds field to absorb the
+    remainder now) can round up to "60m" for a value just under the next whole
+    hour/degree -- must carry into the hour/degree instead."""
+    ra_text = _format_ra_sexagesimal(14.999)  # just under 1h -- minutes would round to 60
+    assert "60m" not in ra_text
+    assert ra_text == "01h00m"
+    dec_text = _format_dec_sexagesimal(0.999)  # just under 1 degree
+    assert "60'" not in dec_text
+    assert dec_text == "+01°00'"
 
 
 # --------------------------------------------------------------------- grid ----

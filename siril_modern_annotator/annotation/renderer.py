@@ -364,35 +364,31 @@ def _choose_grid_step_deg(fov_deg: float, target_lines: int = _GRID_TARGET_LINES
 
 
 def _format_ra_sexagesimal(ra_deg: float) -> str:
+    """Per user request: minutes precision only (no seconds) -- "00h46m", not
+    "00h46m12.3s". Grid line RA values are themselves chosen from a "nice" list (see
+    _GRID_STEP_CHOICES_DEG), so they land on an exact or near-exact minute already;
+    this only needs to round cleanly, not display sub-minute precision."""
     total_hours = (ra_deg % 360.0) / 15.0
     h = int(total_hours)
-    minutes = (total_hours - h) * 60.0
-    m = int(minutes)
-    s = (minutes - m) * 60.0
-    # Guard the classic "59.96s rounds to 60" display bug from naive %.1f formatting.
-    if round(s, 1) >= 60.0:
-        s = 0.0
-        m += 1
-        if m >= 60:
-            m = 0
-            h = (h + 1) % 24
-    return f"{h:02d}h{m:02d}m{s:04.1f}s"
+    m = round((total_hours - h) * 60.0)
+    if m >= 60:  # rounding 59.6 -> 60 must carry into the hour, not display "60m"
+        m = 0
+        h = (h + 1) % 24
+    return f"{h:02d}h{m:02d}m"
 
 
 def _format_dec_sexagesimal(dec_deg: float) -> str:
+    """Matches _format_ra_sexagesimal's minutes-only precision. Plain apostrophe for
+    arcminutes ("+41°30'"), not the typographic prime (′) the RA formatter's seconds
+    variant used to pair with -- simpler, per user request/example."""
     sign = "-" if dec_deg < 0 else "+"
     dec_deg = abs(dec_deg)
     d = int(dec_deg)
-    minutes = (dec_deg - d) * 60.0
-    m = int(minutes)
-    s = (minutes - m) * 60.0
-    if round(s, 1) >= 60.0:
-        s = 0.0
-        m += 1
-        if m >= 60:
-            m = 0
-            d += 1
-    return f"{sign}{d:02d}°{m:02d}′{s:04.1f}″"
+    m = round((dec_deg - d) * 60.0)
+    if m >= 60:
+        m = 0
+        d += 1
+    return f"{sign}{d:02d}°{m:02d}'"
 
 
 @dataclass(frozen=True)
