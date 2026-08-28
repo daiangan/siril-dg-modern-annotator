@@ -69,6 +69,32 @@ class MoveMarkerCommand(QUndoCommand):
         self.refresh()
 
 
+class MoveCompassCommand(QUndoCommand):
+    """Mirrors MoveMarkerCommand exactly (same None-means-default-anchor convention,
+    same reasoning for needing no separate "manual" flag)."""
+
+    def __init__(
+        self,
+        style: object,  # CompassStyle -- kept loosely typed to avoid a models.py import here
+        old_anchor: tuple[float | None, float | None],
+        new_anchor: tuple[float | None, float | None],
+        refresh: Callable[[], None],
+    ):
+        super().__init__("Move compass")
+        self.style = style
+        self.old_anchor = old_anchor
+        self.new_anchor = new_anchor
+        self.refresh = refresh
+
+    def redo(self) -> None:
+        self.style.anchor_x, self.style.anchor_y = self.new_anchor
+        self.refresh()
+
+    def undo(self) -> None:
+        self.style.anchor_x, self.style.anchor_y = self.old_anchor
+        self.refresh()
+
+
 class ToggleVisibilityCommand(QUndoCommand):
     def __init__(self, annotation: Annotation, enabled: bool, refresh: Callable[[], None]):
         super().__init__(f"{'Show' if enabled else 'Hide'}: {annotation.catalog_name}")

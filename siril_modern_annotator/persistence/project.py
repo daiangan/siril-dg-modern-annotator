@@ -16,11 +16,14 @@ from typing import Any
 from ..annotation.models import (
     Annotation,
     BackgroundMode,
+    CompassStyle,
     ConnectorStyle,
+    GridStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
     NameDisplayMode,
+    OverlaySettings,
     StylePreset,
 )
 
@@ -54,6 +57,10 @@ class ProjectData:
     annotations: list[Annotation]
     export_settings: ExportSettings
     schema_version: int = SCHEMA_VERSION
+    # Grid/compass start off every fresh session (per user request) and are only ever
+    # persisted per-image, in this same sidecar -- default_factory so an older saved
+    # file (from before this field existed) still loads fine, per load()'s .get() below.
+    overlay_settings: OverlaySettings = field(default_factory=OverlaySettings)
 
 
 def to_jsonable(value: Any) -> Any:
@@ -78,6 +85,7 @@ def save(path: Path, project: ProjectData) -> None:
         "global_style": to_jsonable(asdict(project.global_style)),
         "annotations": [to_jsonable(asdict(a)) for a in project.annotations],
         "export_settings": to_jsonable(asdict(project.export_settings)),
+        "overlay_settings": to_jsonable(asdict(project.overlay_settings)),
     }
     Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -118,6 +126,13 @@ def annotation_from_dict(d: dict) -> Annotation:
     return Annotation(**d)
 
 
+def overlay_settings_from_dict(d: dict) -> OverlaySettings:
+    return OverlaySettings(
+        grid=GridStyle(**d["grid"]),
+        compass=CompassStyle(**d["compass"]),
+    )
+
+
 def load(path: Path) -> ProjectData:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     schema_version = payload.get("schema_version", 1)
@@ -133,6 +148,14 @@ def load(path: Path) -> ProjectData:
     global_style = style_preset_from_dict(payload["global_style"])
     annotations = [annotation_from_dict(a) for a in payload["annotations"]]
     export_settings = ExportSettings(**payload["export_settings"])
+    # A project file saved before overlay_settings existed simply has no key for it --
+    # ProjectData's own default_factory=OverlaySettings (both start disabled) covers
+    # that case rather than raising a KeyError.
+    overlay_settings = (
+        overlay_settings_from_dict(payload["overlay_settings"])
+        if "overlay_settings" in payload
+        else OverlaySettings()
+    )
     return ProjectData(
         source_width=payload["source_width"],
         source_height=payload["source_height"],
@@ -142,6 +165,7 @@ def load(path: Path) -> ProjectData:
         annotations=annotations,
         export_settings=export_settings,
         schema_version=schema_version,
+        overlay_settings=overlay_settings,
     )
 
 

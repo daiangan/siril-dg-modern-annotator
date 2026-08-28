@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from siril_modern_annotator.annotation.models import (
     Annotation,
     BackgroundMode,
+    CompassStyle,
     ConnectorStyle,
+    GridStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
     NameDisplayMode,
+    OverlaySettings,
     StylePreset,
 )
 from siril_modern_annotator.persistence.project import (
@@ -60,6 +64,10 @@ def _sample_project() -> ProjectData:
         global_style=style,
         annotations=annotations,
         export_settings=ExportSettings(format="jpeg", jpeg_quality=85, resolution_mode="scale", scale_percent=50.0),
+        overlay_settings=OverlaySettings(
+            grid=GridStyle(enabled=True, color="#ff8800", opacity=0.4, line_width=2.0),
+            compass=CompassStyle(enabled=True, color="#00ffaa", anchor_x=1200.0, anchor_y=800.0),
+        ),
     )
 
 
@@ -108,6 +116,30 @@ def test_round_trip_preserves_annotation_fields(tmp_path: Path):
     assert loaded.export_settings.format == "jpeg"
     assert loaded.export_settings.jpeg_quality == 85
     assert loaded.export_settings.scale_percent == 50.0
+
+    assert loaded.overlay_settings.grid.enabled is True
+    assert loaded.overlay_settings.grid.color == "#ff8800"
+    assert loaded.overlay_settings.grid.opacity == 0.4
+    assert loaded.overlay_settings.grid.line_width == 2.0
+    assert loaded.overlay_settings.compass.enabled is True
+    assert loaded.overlay_settings.compass.color == "#00ffaa"
+    assert loaded.overlay_settings.compass.anchor_x == 1200.0
+    assert loaded.overlay_settings.compass.anchor_y == 800.0
+
+
+def test_load_project_saved_before_overlay_settings_existed(tmp_path: Path):
+    """A project file saved by an older version of this app has no "overlay_settings"
+    key at all -- must fall back to a disabled default rather than raising KeyError."""
+    project = _sample_project()
+    path = tmp_path / "test.annotations.json"
+    save(path, project)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["overlay_settings"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load(path)
+    assert loaded.overlay_settings.grid.enabled is False
+    assert loaded.overlay_settings.compass.enabled is False
 
 
 def test_project_path_for_image():

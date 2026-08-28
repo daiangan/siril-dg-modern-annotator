@@ -84,6 +84,44 @@ class LabelStyle:
 
 
 @dataclass
+class GridStyle:
+    """RA/Dec coordinate grid overlay -- an image-level setting, not per-object, so
+    unlike MarkerStyle/LabelStyle this has no per-object override concept and lives
+    directly on OverlaySettings rather than StylePreset."""
+
+    enabled: bool = False  # off by default -- per user request, shown only if asked for
+    color: str = "#66AADD"
+    opacity: float = 0.6
+    line_width: float = 1.0
+    show_labels: bool = True
+    label_font_size: float = 11.0
+
+
+@dataclass
+class CompassStyle:
+    """N/E direction indicator -- also image-level, not per-object."""
+
+    enabled: bool = False  # off by default, same reasoning as GridStyle
+    color: str = "#88CCFF"
+    line_width: float = 1.6
+    arrow_length_fraction: float = 0.06  # of min(image_width, image_height)
+    label_font_size: float = 13.0
+    # None = default bottom-right corner anchor; an explicit override means the user
+    # dragged it. Native image pixel space, same convention as Annotation.marker_x/y.
+    anchor_x: float | None = None
+    anchor_y: float | None = None
+
+
+@dataclass
+class OverlaySettings:
+    """Bundles every image-level (as opposed to per-object) overlay -- currently the
+    RA/Dec grid and compass; a scale bar is a planned future addition here."""
+
+    grid: GridStyle = field(default_factory=GridStyle)
+    compass: CompassStyle = field(default_factory=CompassStyle)
+
+
+@dataclass
 class StylePreset:
     """A named, reusable pairing of marker + label style, used both as the global
     default style and as the basis for per-object overrides."""

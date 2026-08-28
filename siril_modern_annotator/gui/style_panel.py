@@ -369,6 +369,8 @@ class StylePanel(QWidget):
     reset_style_requested = pyqtSignal()
     reset_marker_position_requested = pyqtSignal()
     catalog_color_changed = pyqtSignal(str, str)  # catalog key, new hex color
+    overlay_settings_changed = pyqtSignal()
+    reset_compass_position_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -451,6 +453,66 @@ class StylePanel(QWidget):
             catalog_colors_layout.addRow(label, btn)
             self.catalog_color_buttons[key] = btn
 
+        # RA/Dec grid + compass style customization -- on/off itself lives on the
+        # toolbar's "Overlays" menu (mirrors Catalogs: that button toggles visibility,
+        # this tab only customizes appearance), not duplicated here as a second source
+        # of truth for the same enabled flag.
+        overlays_tab = QWidget()
+        overlays_layout = QVBoxLayout(overlays_tab)
+
+        grid_group = QGroupBox("RA/Dec Grid")
+        grid_form = QFormLayout(grid_group)
+        self.grid_color = ColorButton("#66AADD")
+        self.grid_opacity = DarkDoubleSpinBox()
+        self.grid_opacity.setRange(0.05, 1.0)
+        self.grid_opacity.setSingleStep(0.05)
+        self.grid_line_width = DarkDoubleSpinBox()
+        self.grid_line_width.setRange(0.2, 5.0)
+        self.grid_line_width.setSingleStep(0.2)
+        self.grid_show_labels = QCheckBox("Show coordinate labels")
+        self.grid_show_labels.setChecked(True)
+        self.grid_label_size = DarkDoubleSpinBox()
+        self.grid_label_size.setRange(6.0, 24.0)
+        grid_form.addRow("Color", self.grid_color)
+        grid_form.addRow("Opacity", self.grid_opacity)
+        grid_form.addRow("Line width", self.grid_line_width)
+        grid_form.addRow(self.grid_show_labels)
+        grid_form.addRow("Label size", self.grid_label_size)
+
+        compass_group = QGroupBox("Compass")
+        compass_form = QFormLayout(compass_group)
+        self.compass_color = ColorButton("#88CCFF")
+        self.compass_line_width = DarkDoubleSpinBox()
+        self.compass_line_width.setRange(0.2, 5.0)
+        self.compass_line_width.setSingleStep(0.2)
+        self.compass_arrow_size = DarkDoubleSpinBox()
+        self.compass_arrow_size.setRange(0.02, 0.2)
+        self.compass_arrow_size.setSingleStep(0.01)
+        self.compass_label_size = DarkDoubleSpinBox()
+        self.compass_label_size.setRange(6.0, 24.0)
+        # Same "appear only once overridden" convention as the marker's own Reset
+        # Position button -- see set_overlay_settings.
+        self.reset_compass_btn = QPushButton("Reset Position")
+        self.reset_compass_btn.clicked.connect(self.reset_compass_position_requested)
+        compass_form.addRow("Color", self.compass_color)
+        compass_form.addRow("Line width", self.compass_line_width)
+        compass_form.addRow("Arrow size", self.compass_arrow_size)
+        compass_form.addRow("Label size", self.compass_label_size)
+        compass_form.addRow(self.reset_compass_btn)
+
+        overlays_layout.addWidget(grid_group)
+        overlays_layout.addWidget(compass_group)
+        overlays_layout.addStretch(1)
+
+        for w in (
+            self.grid_opacity, self.grid_line_width, self.grid_show_labels, self.grid_label_size,
+            self.compass_line_width, self.compass_arrow_size, self.compass_label_size,
+        ):
+            signal = getattr(w, "valueChanged", None) or getattr(w, "toggled", None)
+            signal.connect(self.overlay_settings_changed)
+        for btn in (self.grid_color, self.compass_color):
+            btn.color_changed.connect(lambda _c: self.overlay_settings_changed.emit())
+
         # The style editors (Marker/Label/Background/Text effects/Connector group
         # boxes) are taller than the dock is usually given room for -- confirmed by a
         # real screenshot where the Connector section was cut off with no way to reach
@@ -459,6 +521,7 @@ class StylePanel(QWidget):
         self.tabs.addTab(_scrollable(self.global_editor), "Global Style")
         self.tabs.addTab(_scrollable(self.object_tab), "Selected Object")
         self.tabs.addTab(_scrollable(catalog_colors_tab), "Catalog Colors")
+        self.tabs.addTab(_scrollable(overlays_tab), "Overlays")
         layout.addWidget(self.tabs)
 
         self._refresh_preset_list()
@@ -496,6 +559,42 @@ class StylePanel(QWidget):
         double-click on the canvas lands the user directly on that object's own
         controls instead of wherever the Style tab happened to be left."""
         self.tabs.setCurrentIndex(1)
+
+    def set_overlay_settings(self, settings) -> None:
+        """Syncs the Overlays tab's widgets from the current OverlaySettings -- called
+        once at startup and again after every drag/undo/redo of the compass, so
+        reset_compass_btn's visibility (and the color/size widgets, in case a saved
+        project file is reloaded) stay correct without the widgets themselves owning
+        state main_window doesn't know about."""
+        block = self.blockSignals(True)
+        self.grid_color.set_color(settings.grid.color)
+        self.grid_opacity.setValue(settings.grid.opacity)
+        self.grid_line_width.setValue(settings.grid.line_width)
+        self.grid_show_labels.setChecked(settings.grid.show_labels)
+        self.grid_label_size.setValue(settings.grid.label_font_size)
+        self.compass_color.set_color(settings.compass.color)
+        self.compass_line_width.setValue(settings.compass.line_width)
+        self.compass_arrow_size.setValue(settings.compass.arrow_length_fraction)
+        self.compass_label_size.setValue(settings.compass.label_font_size)
+        self.blockSignals(block)
+        self.reset_compass_btn.setVisible(settings.compass.anchor_x is not None)
+
+    def pending_grid_style_values(self) -> dict:
+        return {
+            "color": self.grid_color.hex_color,
+            "opacity": self.grid_opacity.value(),
+            "line_width": self.grid_line_width.value(),
+            "show_labels": self.grid_show_labels.isChecked(),
+            "label_font_size": self.grid_label_size.value(),
+        }
+
+    def pending_compass_style_values(self) -> dict:
+        return {
+            "color": self.compass_color.hex_color,
+            "line_width": self.compass_line_width.value(),
+            "arrow_length_fraction": self.compass_arrow_size.value(),
+            "label_font_size": self.compass_label_size.value(),
+        }
 
     def set_catalog_colors(self, colors: dict[str, str]) -> None:
         # Kept (not just applied to the swatches below) so set_selected_annotation can

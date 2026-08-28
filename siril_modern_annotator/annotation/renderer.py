@@ -14,8 +14,20 @@ import math
 from dataclasses import dataclass, replace
 from typing import Callable
 
+import numpy as np
+
 from .layout import BBox
-from .models import Annotation, ConnectorStyle, LabelStyle, MarkerShape, MarkerStyle, StylePreset
+from .models import (
+    Annotation,
+    CompassStyle,
+    ConnectorStyle,
+    GridStyle,
+    LabelStyle,
+    MarkerShape,
+    MarkerStyle,
+    StylePreset,
+)
+from .wcs import SirilWcs
 
 TextMeasurer = Callable[[str, LabelStyle], tuple[float, float]]
 
@@ -314,3 +326,215 @@ def _line_box_entry_point(px: float, py: float, qx: float, qy: float, bbox: BBox
     if t0 > t1:
         return qx, qy
     return px + t0 * dx, py + t0 * dy
+
+
+# ---------------------------------------------------------------- RA/Dec grid ----
+
+Point = tuple[float, float]
+
+# "Nice" grid spacings in degrees -- mirrors the approach in siril-scripts'
+# Svenesis-AnnotateImage.py (confirmed via direct source read), which this project
+# treats as its closest prior art for this exact feature.
+# sorted()/set() rather than a hand-ordered literal list: the arcsec/arcmin/degree
+# groups don't interleave in ascending order when just concatenated (e.g. 30/60 == 0.5
+# lands *before* 0.05/0.1/0.25 in source order) -- a real bug caught by testing, where
+# _choose_grid_step_deg's "first entry >= ideal" scan could pick a much coarser step
+# than intended because a larger-but-earlier-in-the-list value shadowed the correct one.
+_GRID_STEP_CHOICES_DEG = sorted({
+    1 / 3600, 2 / 3600, 5 / 3600, 10 / 3600, 30 / 3600,  # arcsec range: tight FOVs
+    1 / 60, 2 / 60, 5 / 60, 10 / 60, 30 / 60,  # arcmin range
+    0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 45.0,  # degree range
+})
+_GRID_TARGET_LINES = 5
+_GRID_SAMPLES_PER_LINE = 200
+
+
+def _choose_grid_step_deg(fov_deg: float, target_lines: int = _GRID_TARGET_LINES) -> float:
+    """Smallest predefined "nice" step that gives no more than target_lines lines
+    across the field of view."""
+    if fov_deg <= 0:
+        return _GRID_STEP_CHOICES_DEG[0]
+    ideal = fov_deg / target_lines
+    for step in _GRID_STEP_CHOICES_DEG:
+        if step >= ideal:
+            return step
+    return _GRID_STEP_CHOICES_DEG[-1]
+
+
+def _format_ra_sexagesimal(ra_deg: float) -> str:
+    total_hours = (ra_deg % 360.0) / 15.0
+    h = int(total_hours)
+    minutes = (total_hours - h) * 60.0
+    m = int(minutes)
+    s = (minutes - m) * 60.0
+    # Guard the classic "59.96s rounds to 60" display bug from naive %.1f formatting.
+    if round(s, 1) >= 60.0:
+        s = 0.0
+        m += 1
+        if m >= 60:
+            m = 0
+            h = (h + 1) % 24
+    return f"{h:02d}h{m:02d}m{s:04.1f}s"
+
+
+def _format_dec_sexagesimal(dec_deg: float) -> str:
+    sign = "-" if dec_deg < 0 else "+"
+    dec_deg = abs(dec_deg)
+    d = int(dec_deg)
+    minutes = (dec_deg - d) * 60.0
+    m = int(minutes)
+    s = (minutes - m) * 60.0
+    if round(s, 1) >= 60.0:
+        s = 0.0
+        m += 1
+        if m >= 60:
+            m = 0
+            d += 1
+    return f"{sign}{d:02d}°{m:02d}′{s:04.1f}″"
+
+
+@dataclass(frozen=True)
+class GridLabel:
+    x: float
+    y: float
+    text: str
+
+
+@dataclass(frozen=True)
+class GridGeometry:
+    lines: list[list[Point]]  # each entry is a polyline, already clipped to the frame
+    labels: list[GridLabel]
+    style: GridStyle
+
+
+def _clip_polyline_to_frame(
+    xs: np.ndarray, ys: np.ndarray, width: float, height: float
+) -> list[list[Point]]:
+    """Splits a (possibly partly off-frame, possibly discontinuous near a pole or the
+    0/360 RA wrap) sampled line into contiguous segments that are actually visible."""
+    jump_threshold = max(width, height)
+    segments: list[list[Point]] = []
+    current: list[Point] = []
+    prev: Point | None = None
+    for x, y in zip(xs, ys):
+        in_bounds = 0.0 <= x <= width and 0.0 <= y <= height
+        discontinuous = prev is not None and (
+            abs(x - prev[0]) > jump_threshold or abs(y - prev[1]) > jump_threshold
+        )
+        if not in_bounds or discontinuous:
+            if len(current) >= 2:
+                segments.append(current)
+            current = []
+            prev = None
+            if in_bounds:
+                current = [(float(x), float(y))]
+                prev = current[0]
+            continue
+        current.append((float(x), float(y)))
+        prev = current[-1]
+    if len(current) >= 2:
+        segments.append(current)
+    return segments
+
+
+def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
+    """RA/Dec coordinate grid, clipped to the image frame. Native image pixel space,
+    same as every other geometry function here. wcs is the only thing this needs from
+    the caller -- all the actual sky<->pixel math is SirilWcs's (ARCHITECTURE.md #4;
+    this just calls its existing public methods, the same way CatalogFetchWorker does)."""
+    if not style.enabled:
+        return GridGeometry(lines=[], labels=[], style=style)
+
+    width, height = float(wcs.native_width), float(wcs.native_height)
+    fov = wcs.field_of_view()
+    ra_step = _choose_grid_step_deg(fov.width_deg)
+    dec_step = _choose_grid_step_deg(fov.height_deg)
+
+    # fov.width_deg is already the true angular width (cos(dec)-corrected, see
+    # field_of_view's own math) -- converting it back to a *raw RA-degree* sampling
+    # range (what ra_step actually steps through) needs dividing back out by
+    # cos(dec), or this range comes out too narrow near any non-zero declination and
+    # silently drops real grid lines near the edges of the frame.
+    cos_center_dec = max(math.cos(math.radians(fov.center_dec)), 1e-6)
+    # Pad the sampled range beyond the nominal FOV so a grid line whose *label* point
+    # falls just outside a corner still has the rest of its length correctly clipped
+    # in, rather than the sampled range itself stopping short of the visible frame.
+    dec_lo = fov.center_dec - fov.height_deg / 2.0 - dec_step
+    dec_hi = fov.center_dec + fov.height_deg / 2.0 + dec_step
+    ra_lo = fov.center_ra - (fov.width_deg / 2.0) / cos_center_dec - ra_step
+    ra_hi = fov.center_ra + (fov.width_deg / 2.0) / cos_center_dec + ra_step
+
+    lines: list[list[Point]] = []
+    labels: list[GridLabel] = []
+
+    dec_samples = np.linspace(dec_lo, dec_hi, _GRID_SAMPLES_PER_LINE)
+    first_ra = math.ceil(ra_lo / ra_step) * ra_step
+    ra_value = first_ra
+    while ra_value <= ra_hi:
+        xs, ys = wcs.world_to_pixel(np.full(_GRID_SAMPLES_PER_LINE, ra_value), dec_samples)
+        segments = _clip_polyline_to_frame(xs, ys, width, height)
+        lines.extend(segments)
+        if style.show_labels:
+            for segment in segments:
+                labels.append(GridLabel(segment[0][0], segment[0][1], _format_ra_sexagesimal(ra_value)))
+        ra_value += ra_step
+
+    ra_samples = np.linspace(ra_lo, ra_hi, _GRID_SAMPLES_PER_LINE)
+    first_dec = math.ceil(dec_lo / dec_step) * dec_step
+    dec_value = first_dec
+    while dec_value <= dec_hi:
+        xs, ys = wcs.world_to_pixel(ra_samples, np.full(_GRID_SAMPLES_PER_LINE, dec_value))
+        segments = _clip_polyline_to_frame(xs, ys, width, height)
+        lines.extend(segments)
+        if style.show_labels:
+            for segment in segments:
+                labels.append(GridLabel(segment[0][0], segment[0][1], _format_dec_sexagesimal(dec_value)))
+        dec_value += dec_step
+
+    return GridGeometry(lines=lines, labels=labels, style=style)
+
+
+# ------------------------------------------------------------------ compass ----
+
+_COMPASS_ANGULAR_DELTA_DEG = 0.01
+_COMPASS_DEFAULT_ANCHOR_FRACTION = 0.92  # bottom-right, per user request
+
+
+@dataclass(frozen=True)
+class CompassGeometry:
+    anchor: Point
+    north_end: Point
+    east_end: Point
+    style: CompassStyle
+
+
+def compute_compass_geometry(wcs: SirilWcs, style: CompassStyle) -> CompassGeometry | None:
+    if not style.enabled:
+        return None
+    width, height = float(wcs.native_width), float(wcs.native_height)
+    anchor_x = style.anchor_x if style.anchor_x is not None else width * _COMPASS_DEFAULT_ANCHOR_FRACTION
+    anchor_y = style.anchor_y if style.anchor_y is not None else height * _COMPASS_DEFAULT_ANCHOR_FRACTION
+
+    # Sampled at the anchor's own sky position (not necessarily the image center) so
+    # the arrow direction stays locally accurate even when the anchor has been
+    # dragged, in a field with real rotation or distortion.
+    ref_ra, ref_dec = wcs.pixel_to_world(anchor_x, anchor_y)
+    cos_dec = max(math.cos(math.radians(ref_dec)), 1e-6)
+    north_x, north_y = wcs.world_to_pixel(ref_ra, ref_dec + _COMPASS_ANGULAR_DELTA_DEG)
+    east_x, east_y = wcs.world_to_pixel(ref_ra + _COMPASS_ANGULAR_DELTA_DEG / cos_dec, ref_dec)
+
+    arrow_len = min(width, height) * style.arrow_length_fraction
+
+    def _scaled_end(tx: float, ty: float) -> Point:
+        dx, dy = tx - anchor_x, ty - anchor_y
+        dist = math.hypot(dx, dy)
+        if dist <= 1e-9:
+            return anchor_x, anchor_y
+        return anchor_x + dx / dist * arrow_len, anchor_y + dy / dist * arrow_len
+
+    return CompassGeometry(
+        anchor=(anchor_x, anchor_y),
+        north_end=_scaled_end(north_x, north_y),
+        east_end=_scaled_end(east_x, east_y),
+        style=style,
+    )

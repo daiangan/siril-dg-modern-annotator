@@ -25,15 +25,18 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
-from ..annotation.models import Annotation, BackgroundMode, MarkerShape, StylePreset
+from ..annotation.models import Annotation, BackgroundMode, LabelStyle, MarkerShape, OverlaySettings, StylePreset
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
     default_max_marker_radius_px,
+    compute_compass_geometry,
     compute_connector_points,
+    compute_grid_geometry,
     compute_label_geometry,
     compute_marker_geometry,
     resolve_connector_color,
 )
+from ..annotation.wcs import SirilWcs
 from ..persistence.project import ExportSettings
 
 ProgressCallback = Callable[[str], None]
@@ -196,6 +199,8 @@ def render_annotations(
     output_height: int,
     arcsec_per_px: float | None = None,
     catalog_colors: dict[str, str] | None = None,
+    wcs: SirilWcs | None = None,
+    overlay_settings: OverlaySettings | None = None,
 ) -> Image.Image:
     """Composites enabled annotations onto base_rgb (already at output_width x
     output_height) using the shared geometry from annotation.renderer, scaled by
@@ -211,6 +216,14 @@ def render_annotations(
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
+    # Grid first (underneath everything, matching GridItem's low z-value in the
+    # interactive canvas), objects next, compass last (always on top, matching
+    # CompassItem's high z-value there too) -- both need a real WCS, silently skipped
+    # otherwise (e.g. exporting before an image ever loaded, which shouldn't normally
+    # happen but costs nothing to guard).
+    if wcs is not None and overlay_settings is not None:
+        _draw_grid(draw, wcs, overlay_settings.grid, scale)
+
     for ann in annotations:
         if not ann.enabled:
             continue
@@ -219,6 +232,9 @@ def render_annotations(
         _draw_connector(draw, ann, marker, label, global_style, scale, catalog_colors)
         _draw_marker(draw, marker, scale)
         _draw_label(draw, label, scale)
+
+    if wcs is not None and overlay_settings is not None:
+        _draw_compass(draw, wcs, overlay_settings.compass, scale)
 
     return Image.alpha_composite(image, overlay).convert("RGB")
 
@@ -353,6 +369,40 @@ def _rgba(hex_color: str, alpha: float) -> tuple[int, int, int, int]:
     return r, g, b, max(0, min(255, round(alpha * 255)))
 
 
+def _draw_grid(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) -> None:
+    if not style.enabled:
+        return
+    geo = compute_grid_geometry(wcs, style)
+    color = _rgba(style.color, style.opacity)
+    width = max(1, round(style.line_width * scale))
+    for line in geo.lines:
+        scaled = [_scaled(p, scale) for p in line]
+        draw.line(scaled, fill=color, width=width)
+    if geo.labels:
+        font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.label_font_size), scale)
+        for label in geo.labels:
+            x, y = _scaled((label.x, label.y), scale)
+            draw.text((x + 4 * scale, y - 4 * scale), label.text, fill=color, font=font)
+
+
+def _draw_compass(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) -> None:
+    if not style.enabled:
+        return
+    geo = compute_compass_geometry(wcs, style)
+    if geo is None:
+        return
+    color = _rgba(style.color, 1.0)
+    width = max(1, round(style.line_width * scale))
+    anchor = _scaled(geo.anchor, scale)
+    north = _scaled(geo.north_end, scale)
+    east = _scaled(geo.east_end, scale)
+    draw.line([anchor, north], fill=color, width=width)
+    draw.line([anchor, east], fill=color, width=width)
+    font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.label_font_size), scale)
+    draw.text(north, "N", fill=color, font=font, anchor="mm")
+    draw.text(east, "E", fill=color, font=font, anchor="mm")
+
+
 def export_image(
     output_path: Path,
     pixel_data: np.ndarray,
@@ -363,6 +413,8 @@ def export_image(
     icc_profile: bytes | None = None,
     progress: ProgressCallback = _noop_progress,
     catalog_colors: dict[str, str] | None = None,
+    wcs: SirilWcs | None = None,
+    overlay_settings: OverlaySettings | None = None,
 ) -> Path:
     progress("Preparing image data...")
     # Dimensions must come from the *normalized* array, not the raw pixel_data's own
@@ -377,7 +429,8 @@ def export_image(
 
     progress("Rendering full-resolution image...")
     composited = render_annotations(
-        base_rgb, annotations, global_style, out_w, out_h, arcsec_per_px, catalog_colors
+        base_rgb, annotations, global_style, out_w, out_h, arcsec_per_px, catalog_colors,
+        wcs=wcs, overlay_settings=overlay_settings,
     )
 
     output_path = Path(output_path)

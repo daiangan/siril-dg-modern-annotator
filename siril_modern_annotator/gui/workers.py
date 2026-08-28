@@ -16,7 +16,7 @@ import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..annotation.catalogs import CatalogProvider
-from ..annotation.models import Annotation, StylePreset
+from ..annotation.models import Annotation, OverlaySettings, StylePreset
 from ..annotation.wcs import SirilWcs
 from ..persistence.project import ExportSettings
 
@@ -66,6 +66,8 @@ class ExportWorker(QThread):
         icc_profile: bytes | None,
         parent=None,
         catalog_colors: dict[str, str] | None = None,
+        wcs: SirilWcs | None = None,
+        overlay_settings: OverlaySettings | None = None,
     ):
         super().__init__(parent)
         self._output_path = output_path
@@ -76,6 +78,8 @@ class ExportWorker(QThread):
         self._arcsec_per_px = arcsec_per_px
         self._icc_profile = icc_profile
         self._catalog_colors = catalog_colors
+        self._wcs = wcs
+        self._overlay_settings = overlay_settings
 
     def run(self) -> None:
         from ..export.exporter import export_image
@@ -91,6 +95,8 @@ class ExportWorker(QThread):
                 icc_profile=self._icc_profile,
                 progress=self.progress.emit,
                 catalog_colors=self._catalog_colors,
+                wcs=self._wcs,
+                overlay_settings=self._overlay_settings,
             )
             self.succeeded.emit(str(result))
         except Exception as exc:  # noqa: BLE001

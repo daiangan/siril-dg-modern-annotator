@@ -40,9 +40,10 @@ from ..annotation.catalogs import (
     VizierProvider,
 )
 from ..annotation.layout import auto_arrange
-from ..annotation.models import Annotation, StylePreset
+from ..annotation.models import Annotation, OverlaySettings, StylePreset
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
+    compute_compass_geometry,
     compute_connector_points,
     compute_label_geometry,
     compute_marker_geometry,
@@ -54,10 +55,12 @@ from ..persistence import presets as preset_store
 from ..persistence.project import CatalogConfig, ExportSettings, ProjectData, load, project_path_for_image, save
 from ..siril_bridge.interface import ImageInfo, NoImageLoadedError, SirilBridge, SirilBridgeError
 from .annotation_item import ConnectorItem, LabelItem, MarkerItem, qt_text_measurer
+from .overlay_item import CompassItem, GridItem
 from .commands import (
     AnnotationFieldsCommand,
     AutoArrangeCommand,
     GlobalStyleChangeCommand,
+    MoveCompassCommand,
     MoveLabelCommand,
     MoveMarkerCommand,
     ToggleVisibilityCommand,
@@ -138,6 +141,14 @@ class MainWindow(QMainWindow):
         self.connector_items: dict[str, ConnectorItem] = {}
         self.selected_id: str | None = None
 
+        # Grid/compass: off by default every session (per user request) -- unlike
+        # global_style/catalog_colors above, deliberately not restored from
+        # last_used_store; re-enabling them is a quick toolbar toggle either way. Only
+        # ever persisted per-image, in a saved project file (see persistence/project.py).
+        self.overlay_settings = OverlaySettings()
+        self.grid_item: GridItem | None = None
+        self.compass_item: CompassItem | None = None
+
         self._pending_object_cmd: AnnotationFieldsCommand | None = None
         self._pending_object_target: str | None = None
 
@@ -174,6 +185,9 @@ class MainWindow(QMainWindow):
         self.style_panel.reset_style_requested.connect(self._on_reset_global_style)
         self.style_panel.reset_marker_position_requested.connect(self._reset_selected_marker_position)
         self.style_panel.catalog_color_changed.connect(self._on_catalog_color_changed)
+        self.style_panel.overlay_settings_changed.connect(self._on_overlay_style_edited)
+        self.style_panel.reset_compass_position_requested.connect(self._reset_compass_position)
+        self.style_panel.set_overlay_settings(self.overlay_settings)
 
         self.dock_tabs = QTabWidget()
         self.dock_tabs.addTab(self.object_panel, "Objects")
@@ -252,6 +266,27 @@ class MainWindow(QMainWindow):
             self.catalog_actions[key] = action
         catalogs_btn.setMenu(self.catalogs_menu)
         toolbar.addWidget(catalogs_btn)
+        toolbar.addSeparator()
+
+        # RA/Dec grid + compass: off by default, quick on/off here (brief: "should be
+        # turned off by default and then displayed if the user wants") -- style/color
+        # customization lives in the Style panel's Overlays tab, same "quick toggle
+        # here, full editing there" split as the Catalogs button above.
+        overlays_btn = QToolButton()
+        overlays_btn.setText("Overlays ▾")
+        overlays_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        overlays_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.overlays_menu = CheckableMenu(self)
+        self.grid_action = QAction("RA/Dec Grid", self, checkable=True)
+        self.grid_action.setChecked(self.overlay_settings.grid.enabled)
+        self.grid_action.toggled.connect(self._on_grid_toggled)
+        self.compass_action = QAction("Compass", self, checkable=True)
+        self.compass_action.setChecked(self.overlay_settings.compass.enabled)
+        self.compass_action.toggled.connect(self._on_compass_toggled)
+        self.overlays_menu.addAction(self.grid_action)
+        self.overlays_menu.addAction(self.compass_action)
+        overlays_btn.setMenu(self.overlays_menu)
+        toolbar.addWidget(overlays_btn)
         toolbar.addSeparator()
 
         auto_arrange_btn = QPushButton("Auto Arrange Labels")
@@ -346,6 +381,7 @@ class MainWindow(QMainWindow):
             self.wcs = SirilWcs.from_header_dict(header, self.image_info.width, self.image_info.height)
             self.arcsec_per_px = self.wcs.pixel_scale_arcsec_per_px()
             self.icc_profile = self.bridge.get_image_icc_profile()
+            self._setup_overlay_items()
             # Prefer the actual loaded filename over the FITS OBJECT keyword -- per
             # user request, exports should be named after "the original image name",
             # and OBJECT is frequently blank/generic rather than reflecting the real
@@ -541,6 +577,79 @@ class MainWindow(QMainWindow):
             self, "Catalog Query Failed",
             f"Could not fetch catalog objects (check your internet connection):\n{message}",
         )
+
+    # --------------------------------------------------------------- overlays ----
+
+    def _setup_overlay_items(self) -> None:
+        """Creates (or, on reloading a different image, re-creates against the new
+        wcs) the grid/compass scene items. Independent of _rebuild_scene -- those are
+        one-per-Annotation, these are one-per-image."""
+        if self.wcs is None:
+            return
+        for item in (self.grid_item, self.compass_item):
+            if item is not None and item.scene() is not None:
+                item.scene().removeItem(item)
+        self.grid_item = GridItem(self.wcs, self.overlay_settings.grid)
+        self.compass_item = CompassItem(self.wcs, self.overlay_settings.compass)
+        self.compass_item.moved.connect(self._on_compass_moved)
+        self.compass_item.context_menu_requested.connect(self._show_compass_context_menu)
+        self.image_view.scene_.addItem(self.grid_item)
+        self.image_view.scene_.addItem(self.compass_item)
+
+    def _refresh_overlays(self) -> None:
+        if self.grid_item is not None:
+            self.grid_item.prepareGeometryChange()
+            self.grid_item.update()
+        if self.compass_item is not None:
+            self.compass_item._sync_pos_from_model()
+            self.compass_item.update()
+        self.style_panel.set_overlay_settings(self.overlay_settings)
+
+    def _on_grid_toggled(self, checked: bool) -> None:
+        self.overlay_settings.grid.enabled = checked
+        self._refresh_overlays()
+
+    def _on_compass_toggled(self, checked: bool) -> None:
+        self.overlay_settings.compass.enabled = checked
+        self._refresh_overlays()
+
+    def _on_overlay_style_edited(self) -> None:
+        # No undo tracking, same as catalog color edits (_on_catalog_color_changed) --
+        # a style tweak, not a spatial edit like the compass drag/reset below.
+        for key, value in self.style_panel.pending_grid_style_values().items():
+            setattr(self.overlay_settings.grid, key, value)
+        for key, value in self.style_panel.pending_compass_style_values().items():
+            setattr(self.overlay_settings.compass, key, value)
+        self._refresh_overlays()
+
+    def _on_compass_moved(self, new_x: float, new_y: float) -> None:
+        style = self.overlay_settings.compass
+        # Same no-op guard as _on_marker_moved: a plain click without real movement
+        # must not silently create a "custom position" override.
+        current = compute_compass_geometry(self.wcs, style)
+        if current is not None and (new_x, new_y) == current.anchor:
+            return
+        old_anchor = (style.anchor_x, style.anchor_y)
+        cmd = MoveCompassCommand(style, old_anchor, (new_x, new_y), self._refresh_overlays)
+        self.undo_stack.push(cmd)
+
+    def _reset_compass_position(self) -> None:
+        style = self.overlay_settings.compass
+        if style.anchor_x is None:
+            return
+        old_anchor = (style.anchor_x, style.anchor_y)
+        cmd = MoveCompassCommand(style, old_anchor, (None, None), self._refresh_overlays)
+        self.undo_stack.push(cmd)
+
+    def _show_compass_context_menu(self, screen_pos) -> None:
+        # Mirrors _show_object_context_menu's Reset Position entry: only offered once
+        # the compass has actually been dragged off its default corner.
+        if self.overlay_settings.compass.anchor_x is None:
+            return
+        menu = QMenu(self)
+        reset_action = menu.addAction("Reset Position")
+        reset_action.triggered.connect(self._reset_compass_position)
+        menu.exec(screen_pos)
 
     # --------------------------------------------------------------- scene sync ----
 
@@ -894,6 +1003,7 @@ class MainWindow(QMainWindow):
             Path(path_str), pixel_data, self.annotations, self.global_style_holder[0],
             settings, self.arcsec_per_px, self.icc_profile,
             catalog_colors=self.catalog_colors,
+            wcs=self.wcs, overlay_settings=self.overlay_settings,
         )
         self._export_worker.progress.connect(self._progress_dialog.setLabelText)
         self._export_worker.succeeded.connect(self._on_export_succeeded)
@@ -934,6 +1044,7 @@ class MainWindow(QMainWindow):
             global_style=self.global_style_holder[0],
             annotations=self.annotations,
             export_settings=ExportSettings(),
+            overlay_settings=self.overlay_settings,
         )
         try:
             save(Path(path_str), project)
@@ -968,7 +1079,17 @@ class MainWindow(QMainWindow):
             action.blockSignals(True)
             action.setChecked(key in self.active_catalogs)
             action.blockSignals(False)
+        self.overlay_settings = project.overlay_settings
+        self.grid_action.blockSignals(True)
+        self.grid_action.setChecked(self.overlay_settings.grid.enabled)
+        self.grid_action.blockSignals(False)
+        self.compass_action.blockSignals(True)
+        self.compass_action.setChecked(self.overlay_settings.compass.enabled)
+        self.compass_action.blockSignals(False)
+        if self.wcs is not None:
+            self._setup_overlay_items()
         self.undo_stack.clear()
         self._rebuild_scene()
         self.object_panel.set_annotations(self.annotations)
         self.style_panel.set_global_style(self.global_style_holder[0])
+        self.style_panel.set_overlay_settings(self.overlay_settings)
