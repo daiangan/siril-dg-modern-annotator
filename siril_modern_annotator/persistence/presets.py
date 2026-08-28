@@ -13,11 +13,14 @@ from PyQt6.QtCore import QSettings
 
 from ..annotation.models import (
     BackgroundMode,
+    CompassStyle,
     ConnectorStyle,
+    GridStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
     NameDisplayMode,
+    OverlaySettings,
     StylePreset,
 )
 from .project import label_style_from_dict, marker_style_from_dict, style_preset_from_dict, to_jsonable
@@ -95,6 +98,24 @@ def default_preset_for_image(width: int, height: int) -> StylePreset:
         marker_style=marker,
         label_style=label,
         connector_width=_DEFAULT_STROKE_WIDTH_PX,
+    )
+
+
+# Unlike the object-label font size above (deliberately flat -- see the comment on
+# that), grid/compass label text has no background box behind it and reads as either
+# "fine" or "invisible" depending on how it scales with the frame -- per a real
+# report, the flat 11-13pt default was unreadable on a large image. Proportional to
+# the shorter image dimension so it stays legible at "fit to window" zoom regardless
+# of native resolution, floored so a small image doesn't get illegibly tiny text either.
+_OVERLAY_LABEL_FRACTION = 0.015
+_OVERLAY_LABEL_MIN_PT = 14.0
+
+
+def default_overlay_settings_for_image(width: int, height: int) -> OverlaySettings:
+    label_size = max(_OVERLAY_LABEL_MIN_PT, min(width, height) * _OVERLAY_LABEL_FRACTION)
+    return OverlaySettings(
+        grid=GridStyle(label_font_size=label_size),
+        compass=CompassStyle(label_font_size=label_size),
     )
 
 

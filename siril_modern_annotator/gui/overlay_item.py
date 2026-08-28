@@ -12,14 +12,31 @@ calls off the exact same functions (ARCHITECTURE.md #8).
 from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
-from ..annotation.models import CompassStyle, GridStyle
+from ..annotation.models import CompassStyle, DecLabelPosition, GridStyle, RaLabelPosition
 from ..annotation.renderer import compute_compass_geometry, compute_grid_geometry
 from ..annotation.wcs import SirilWcs
 
 _LABEL_FONT_FAMILY = "Verdana"  # ships on both macOS and Windows -- see theme_dark.qss
+
+
+def _grid_label_draw_point(label, style: GridStyle, metrics: QFontMetricsF) -> QPointF:
+    """QPainter.drawText(point, text) places point at the text's baseline-left corner
+    -- unlike Pillow's anchor= (used identically for this same label in
+    export/exporter.py's _draw_grid), Qt has no built-in anchor modes, so this computes
+    the equivalent baseline position by hand: text grows *inward* from label.(x, y)
+    (already inset from the frame edge by renderer.compute_grid_geometry) rather than
+    being centered on or overhanging past it."""
+    width = metrics.horizontalAdvance(label.text)
+    if label.axis == "ra":
+        x = label.x - width / 2.0
+        y = label.y + metrics.ascent() if style.ra_label_position is RaLabelPosition.TOP else label.y - metrics.descent()
+    else:
+        x = label.x - width if style.dec_label_position is DecLabelPosition.RIGHT else label.x
+        y = label.y + (metrics.ascent() - metrics.descent()) / 2.0
+    return QPointF(x, y)
 
 
 class GridItem(QGraphicsItem):
@@ -62,8 +79,9 @@ class GridItem(QGraphicsItem):
             font = QFont(_LABEL_FONT_FAMILY)
             font.setPointSizeF(max(1.0, style.label_font_size))
             painter.setFont(font)
+            metrics = QFontMetricsF(font)
             for label in geo.labels:
-                painter.drawText(QPointF(label.x + 4, label.y - 4), label.text)
+                painter.drawText(_grid_label_draw_point(label, style, metrics), label.text)
 
 
 class CompassItem(QGraphicsObject):

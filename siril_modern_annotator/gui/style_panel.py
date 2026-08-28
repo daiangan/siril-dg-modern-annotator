@@ -33,10 +33,12 @@ from ..annotation.models import (
     Annotation,
     BackgroundMode,
     ConnectorStyle,
+    DecLabelPosition,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
     NameDisplayMode,
+    RaLabelPosition,
     StylePreset,
 )
 from ..annotation.renderer import resolve_connector_color, resolve_marker_color
@@ -471,13 +473,25 @@ class StylePanel(QWidget):
         self.grid_line_width.setSingleStep(0.2)
         self.grid_show_labels = QCheckBox("Show coordinate labels")
         self.grid_show_labels.setChecked(True)
+        # Range tops out well above the plain 6-24 an object label's font size uses --
+        # per user request, this is now resolution-scaled (see
+        # persistence/presets.py's default_overlay_settings_for_image) and can
+        # legitimately land north of 100pt on a large image.
         self.grid_label_size = DarkDoubleSpinBox()
-        self.grid_label_size.setRange(6.0, 24.0)
+        self.grid_label_size.setRange(6.0, 200.0)
+        self.grid_ra_position = QComboBox()
+        for pos in RaLabelPosition:
+            self.grid_ra_position.addItem(pos.value.capitalize(), pos)
+        self.grid_dec_position = QComboBox()
+        for pos in DecLabelPosition:
+            self.grid_dec_position.addItem(pos.value.capitalize(), pos)
         grid_form.addRow("Color", self.grid_color)
         grid_form.addRow("Opacity", self.grid_opacity)
         grid_form.addRow("Line width", self.grid_line_width)
         grid_form.addRow(self.grid_show_labels)
         grid_form.addRow("Label size", self.grid_label_size)
+        grid_form.addRow("RA labels", self.grid_ra_position)
+        grid_form.addRow("Dec labels", self.grid_dec_position)
 
         compass_group = QGroupBox("Compass")
         compass_form = QFormLayout(compass_group)
@@ -489,7 +503,7 @@ class StylePanel(QWidget):
         self.compass_arrow_size.setRange(0.02, 0.2)
         self.compass_arrow_size.setSingleStep(0.01)
         self.compass_label_size = DarkDoubleSpinBox()
-        self.compass_label_size.setRange(6.0, 24.0)
+        self.compass_label_size.setRange(6.0, 200.0)
         # Same "appear only once overridden" convention as the marker's own Reset
         # Position button -- see set_overlay_settings.
         self.reset_compass_btn = QPushButton("Reset Position")
@@ -506,9 +520,14 @@ class StylePanel(QWidget):
 
         for w in (
             self.grid_opacity, self.grid_line_width, self.grid_show_labels, self.grid_label_size,
+            self.grid_ra_position, self.grid_dec_position,
             self.compass_line_width, self.compass_arrow_size, self.compass_label_size,
         ):
-            signal = getattr(w, "valueChanged", None) or getattr(w, "toggled", None)
+            signal = (
+                getattr(w, "currentIndexChanged", None)
+                or getattr(w, "valueChanged", None)
+                or getattr(w, "toggled", None)
+            )
             signal.connect(self.overlay_settings_changed)
         for btn in (self.grid_color, self.compass_color):
             btn.color_changed.connect(lambda _c: self.overlay_settings_changed.emit())
@@ -572,6 +591,8 @@ class StylePanel(QWidget):
         self.grid_line_width.setValue(settings.grid.line_width)
         self.grid_show_labels.setChecked(settings.grid.show_labels)
         self.grid_label_size.setValue(settings.grid.label_font_size)
+        self.grid_ra_position.setCurrentIndex(self.grid_ra_position.findData(settings.grid.ra_label_position))
+        self.grid_dec_position.setCurrentIndex(self.grid_dec_position.findData(settings.grid.dec_label_position))
         self.compass_color.set_color(settings.compass.color)
         self.compass_line_width.setValue(settings.compass.line_width)
         self.compass_arrow_size.setValue(settings.compass.arrow_length_fraction)
@@ -586,6 +607,8 @@ class StylePanel(QWidget):
             "line_width": self.grid_line_width.value(),
             "show_labels": self.grid_show_labels.isChecked(),
             "label_font_size": self.grid_label_size.value(),
+            "ra_label_position": self.grid_ra_position.currentData(),
+            "dec_label_position": self.grid_dec_position.currentData(),
         }
 
     def pending_compass_style_values(self) -> dict:

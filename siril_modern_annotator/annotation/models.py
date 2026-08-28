@@ -83,6 +83,16 @@ class LabelStyle:
     name_display: NameDisplayMode = NameDisplayMode.CATALOG_ONLY
 
 
+class RaLabelPosition(str, Enum):
+    TOP = "top"
+    BOTTOM = "bottom"
+
+
+class DecLabelPosition(str, Enum):
+    RIGHT = "right"
+    LEFT = "left"
+
+
 @dataclass
 class GridStyle:
     """RA/Dec coordinate grid overlay -- an image-level setting, not per-object, so
@@ -94,7 +104,14 @@ class GridStyle:
     opacity: float = 0.6
     line_width: float = 1.0
     show_labels: bool = True
+    # A flat default here is overridden with a resolution-scaled value at image load
+    # time (persistence/presets.py's default_overlay_settings_for_image) -- per user
+    # report, a small flat size was unreadable on a large image. This field only
+    # matters as the fallback for a brand new StylePreset built without going through
+    # that path (e.g. directly in a test).
     label_font_size: float = 11.0
+    ra_label_position: RaLabelPosition = RaLabelPosition.TOP
+    dec_label_position: DecLabelPosition = DecLabelPosition.RIGHT
 
 
 @dataclass

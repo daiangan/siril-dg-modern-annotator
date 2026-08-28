@@ -25,7 +25,16 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
-from ..annotation.models import Annotation, BackgroundMode, LabelStyle, MarkerShape, OverlaySettings, StylePreset
+from ..annotation.models import (
+    Annotation,
+    BackgroundMode,
+    DecLabelPosition,
+    LabelStyle,
+    MarkerShape,
+    OverlaySettings,
+    RaLabelPosition,
+    StylePreset,
+)
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
     default_max_marker_radius_px,
@@ -382,7 +391,15 @@ def _draw_grid(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) ->
         font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.label_font_size), scale)
         for label in geo.labels:
             x, y = _scaled((label.x, label.y), scale)
-            draw.text((x + 4 * scale, y - 4 * scale), label.text, fill=color, font=font)
+            # Anchors so the text grows *inward* from the label's point (which
+            # compute_grid_geometry already inset from the true frame edge) instead of
+            # being centered on it -- centering could still push half the text past
+            # the edge. Pillow anchor codes: horizontal l/m/r, vertical a(scender)/m/d(escender).
+            anchor = {
+                "ra": "ma" if style.ra_label_position is RaLabelPosition.TOP else "md",
+                "dec": "rm" if style.dec_label_position is DecLabelPosition.RIGHT else "lm",
+            }[label.axis]
+            draw.text((x, y), label.text, fill=color, font=font, anchor=anchor)
 
 
 def _draw_compass(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) -> None:

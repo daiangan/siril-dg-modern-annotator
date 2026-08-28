@@ -18,12 +18,14 @@ from ..annotation.models import (
     BackgroundMode,
     CompassStyle,
     ConnectorStyle,
+    DecLabelPosition,
     GridStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
     NameDisplayMode,
     OverlaySettings,
+    RaLabelPosition,
     StylePreset,
 )
 
@@ -126,9 +128,16 @@ def annotation_from_dict(d: dict) -> Annotation:
     return Annotation(**d)
 
 
+def grid_style_from_dict(d: dict) -> GridStyle:
+    d = dict(d)
+    d["ra_label_position"] = RaLabelPosition(d["ra_label_position"])
+    d["dec_label_position"] = DecLabelPosition(d["dec_label_position"])
+    return GridStyle(**d)
+
+
 def overlay_settings_from_dict(d: dict) -> OverlaySettings:
     return OverlaySettings(
-        grid=GridStyle(**d["grid"]),
+        grid=grid_style_from_dict(d["grid"]),
         compass=CompassStyle(**d["compass"]),
     )
 

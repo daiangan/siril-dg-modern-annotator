@@ -381,7 +381,15 @@ class MainWindow(QMainWindow):
             self.wcs = SirilWcs.from_header_dict(header, self.image_info.width, self.image_info.height)
             self.arcsec_per_px = self.wcs.pixel_scale_arcsec_per_px()
             self.icc_profile = self.bridge.get_image_icc_profile()
+            # Label font sizes only -- enabled/color/etc. keep their dataclass defaults
+            # (both off). Not gated behind _has_saved_style like global_style_holder
+            # below: overlay settings are never restored from a previous session (per
+            # user request, always start off), so there's no "last used" size to keep.
+            self.overlay_settings = preset_store.default_overlay_settings_for_image(
+                self.image_info.width, self.image_info.height
+            )
             self._setup_overlay_items()
+            self.style_panel.set_overlay_settings(self.overlay_settings)
             # Prefer the actual loaded filename over the FITS OBJECT keyword -- per
             # user request, exports should be named after "the original image name",
             # and OBJECT is frequently blank/generic rather than reflecting the real

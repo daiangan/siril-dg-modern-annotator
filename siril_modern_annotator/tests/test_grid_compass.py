@@ -9,8 +9,9 @@ import math
 
 import pytest
 
-from siril_modern_annotator.annotation.models import CompassStyle, GridStyle
+from siril_modern_annotator.annotation.models import CompassStyle, DecLabelPosition, GridStyle, RaLabelPosition
 from siril_modern_annotator.annotation.renderer import (
+    _GRID_LABEL_MARGIN_PX,
     _choose_grid_step_deg,
     _format_dec_sexagesimal,
     _format_ra_sexagesimal,
@@ -131,6 +132,54 @@ def test_grid_geometry_no_labels_when_show_labels_false():
     geo = compute_grid_geometry(wcs, GridStyle(enabled=True, show_labels=False))
     assert len(geo.lines) > 0
     assert geo.labels == []
+
+
+def test_grid_labels_stay_within_frame_margin():
+    """Regression test for a real report: Dec labels landed right at (or past) the
+    image edge, so the exported text was partly or fully cut off. Every label's anchor
+    point must be inset from the frame edge by at least the configured margin."""
+    wcs = _wcs()
+    geo = compute_grid_geometry(wcs, GridStyle(enabled=True))
+    assert len(geo.labels) > 0
+    for label in geo.labels:
+        assert _GRID_LABEL_MARGIN_PX - 1e-6 <= label.x <= _WIDTH - _GRID_LABEL_MARGIN_PX + 1e-6
+        assert _GRID_LABEL_MARGIN_PX - 1e-6 <= label.y <= _HEIGHT - _GRID_LABEL_MARGIN_PX + 1e-6
+
+
+def test_ra_labels_prefer_top_edge_by_default():
+    wcs = _wcs()
+    geo = compute_grid_geometry(wcs, GridStyle(enabled=True))
+    ra_labels = [l for l in geo.labels if l.axis == "ra"]
+    assert ra_labels
+    for label in ra_labels:
+        assert label.y < _HEIGHT / 2.0, "RA labels should default to the top edge"
+
+
+def test_ra_labels_move_to_bottom_when_configured():
+    wcs = _wcs()
+    geo = compute_grid_geometry(wcs, GridStyle(enabled=True, ra_label_position=RaLabelPosition.BOTTOM))
+    ra_labels = [l for l in geo.labels if l.axis == "ra"]
+    assert ra_labels
+    for label in ra_labels:
+        assert label.y > _HEIGHT / 2.0
+
+
+def test_dec_labels_prefer_right_edge_by_default():
+    wcs = _wcs()
+    geo = compute_grid_geometry(wcs, GridStyle(enabled=True))
+    dec_labels = [l for l in geo.labels if l.axis == "dec"]
+    assert dec_labels
+    for label in dec_labels:
+        assert label.x > _WIDTH / 2.0, "Dec labels should default to the right edge"
+
+
+def test_dec_labels_move_to_left_when_configured():
+    wcs = _wcs()
+    geo = compute_grid_geometry(wcs, GridStyle(enabled=True, dec_label_position=DecLabelPosition.LEFT))
+    dec_labels = [l for l in geo.labels if l.axis == "dec"]
+    assert dec_labels
+    for label in dec_labels:
+        assert label.x < _WIDTH / 2.0
 
 
 # ------------------------------------------------------------------ compass ----

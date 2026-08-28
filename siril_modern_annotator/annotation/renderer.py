@@ -21,10 +21,12 @@ from .models import (
     Annotation,
     CompassStyle,
     ConnectorStyle,
+    DecLabelPosition,
     GridStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
+    RaLabelPosition,
     StylePreset,
 )
 from .wcs import SirilWcs
@@ -398,6 +400,14 @@ class GridLabel:
     x: float
     y: float
     text: str
+    # Which edge this label sits near -- "ra" (a meridian, near the top or bottom edge
+    # per style.ra_label_position) or "dec" (a parallel, near the right or left edge
+    # per style.dec_label_position). The drawing backends (gui/overlay_item.py,
+    # export/exporter.py) use this to anchor the text so it grows *inward* from (x, y)
+    # rather than being centered on it -- centering would let text overhang the frame
+    # edge for a label point deliberately placed close to that edge (see
+    # _pick_grid_label_point's margin).
+    axis: str
 
 
 @dataclass(frozen=True)
@@ -435,6 +445,35 @@ def _clip_polyline_to_frame(
     if len(current) >= 2:
         segments.append(current)
     return segments
+
+
+_GRID_LABEL_MARGIN_PX = 6.0
+
+
+def _pick_grid_label_point(
+    segment: list[Point], axis: str, style: GridStyle, width: float, height: float
+) -> Point:
+    """Where a grid line's label anchors, on a real point of the (possibly curved,
+    possibly not-quite-vertical/horizontal) line itself, biased toward the requested
+    edge and inset by a small margin so the text (anchored to grow inward from this
+    point -- see GridLabel) never overhangs the frame. Previously this was always just
+    segment[0] -- wherever the sampling loop happened to enter the frame -- which for
+    many lines landed hard against the very edge, with the export's Pillow anchor
+    defaulting to centered-on-the-point and no margin at all: a real, confirmed report
+    of Dec labels rendering partly or fully outside the exported image."""
+    if axis == "ra":
+        # Roughly vertical: bias toward the top or bottom edge.
+        point = min(segment, key=lambda p: p[1]) if style.ra_label_position is RaLabelPosition.TOP else max(
+            segment, key=lambda p: p[1]
+        )
+    else:
+        # Roughly horizontal: bias toward the right or left edge.
+        point = max(segment, key=lambda p: p[0]) if style.dec_label_position is DecLabelPosition.RIGHT else min(
+            segment, key=lambda p: p[0]
+        )
+    x = min(max(point[0], _GRID_LABEL_MARGIN_PX), width - _GRID_LABEL_MARGIN_PX)
+    y = min(max(point[1], _GRID_LABEL_MARGIN_PX), height - _GRID_LABEL_MARGIN_PX)
+    return x, y
 
 
 def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
@@ -476,7 +515,8 @@ def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
         lines.extend(segments)
         if style.show_labels:
             for segment in segments:
-                labels.append(GridLabel(segment[0][0], segment[0][1], _format_ra_sexagesimal(ra_value)))
+                lx, ly = _pick_grid_label_point(segment, "ra", style, width, height)
+                labels.append(GridLabel(lx, ly, _format_ra_sexagesimal(ra_value), axis="ra"))
         ra_value += ra_step
 
     ra_samples = np.linspace(ra_lo, ra_hi, _GRID_SAMPLES_PER_LINE)
@@ -488,7 +528,8 @@ def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
         lines.extend(segments)
         if style.show_labels:
             for segment in segments:
-                labels.append(GridLabel(segment[0][0], segment[0][1], _format_dec_sexagesimal(dec_value)))
+                lx, ly = _pick_grid_label_point(segment, "dec", style, width, height)
+                labels.append(GridLabel(lx, ly, _format_dec_sexagesimal(dec_value), axis="dec"))
         dec_value += dec_step
 
     return GridGeometry(lines=lines, labels=labels, style=style)
