@@ -22,6 +22,7 @@ _STARTUP_BANNER_LINES = [
     "  DG Modern Annotator",
     "  Author: Daian Gan",
     "  Email:  daian@ganmedia.com",
+    "  Web:    https://daiangan.com",
     "================================================",
 ]
 

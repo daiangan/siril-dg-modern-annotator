@@ -94,7 +94,7 @@ plate-solved image.
 
 ## Author
 
-Daian Gan ([daian@ganmedia.com](mailto:daian@ganmedia.com))
+Daian Gan ([daian@ganmedia.com](mailto:daian@ganmedia.com)) — [daiangan.com](https://daiangan.com)
 
 If this tool has been useful to you, consider [buying me a coffee](https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA) — also available as a button in the app's own toolbar.
 
