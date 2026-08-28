@@ -1,0 +1,4 @@
+name,ra,dec,diameter,mag,alias
+NGC-TEST-NEAR,310.05,41.02,4,11.2,
+NGC-TEST-NOMAG,310.02,40.98,,,
+NGC-TEST-DIM,310.01,41.01,3,99.0,

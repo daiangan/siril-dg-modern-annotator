@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+.DS_Store
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Packaging / tooling
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# OS junk (Windows, in case this is ever cloned/edited there)
+Thumbs.db
+desktop.ini

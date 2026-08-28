@@ -1,0 +1,639 @@
+"""Label/marker/connector styling controls: global default style (brief #15-17) plus
+per-object overrides for the currently selected annotation (brief #18).
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QFontComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..annotation.catalogs import DEFAULT_CATALOG_COLORS, SUPPORTED_CATALOGS
+from .widgets import DarkDoubleSpinBox, DarkSpinBox
+from ..annotation.models import (
+    Annotation,
+    BackgroundMode,
+    ConnectorStyle,
+    LabelStyle,
+    MarkerShape,
+    MarkerStyle,
+    NameDisplayMode,
+    StylePreset,
+)
+from ..annotation.renderer import resolve_connector_color, resolve_marker_color
+from ..persistence import presets as preset_store
+
+
+def _scrollable(widget: QWidget) -> QScrollArea:
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setFrameShape(QScrollArea.Shape.NoFrame)
+    area.setWidget(widget)
+    return area
+
+
+class ColorButton(QPushButton):
+    color_changed = pyqtSignal(str)
+
+    def __init__(self, initial_hex: str = "#ffffff", parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(48)
+        self._hex = initial_hex
+        self.set_color(initial_hex)
+        self.clicked.connect(self._pick)
+
+    @property
+    def hex_color(self) -> str:
+        return self._hex
+
+    def set_color(self, hex_color: str) -> None:
+        self._hex = hex_color
+        self.setStyleSheet(f"background-color: {hex_color}; border: 1px solid #444;")
+
+    def _pick(self) -> None:
+        # DontUseNativeDialog: on Windows/macOS, QColorDialog.getColor() otherwise uses
+        # the OS's own native color picker, which is a real system dialog outside Qt's
+        # control -- it ignores the app-wide dark stylesheet (modern_annotator.py's
+        # load_dark_stylesheet()) entirely, rendering light/native regardless of the
+        # rest of the app. Confirmed by a real screenshot: the picker looked jarringly
+        # different from the annotator's own dark theme. Qt's own bundled dialog is a
+        # normal QWidget tree (QLineEdit/QSpinBox/QPushButton etc.), so it already
+        # picks up that same stylesheet for free once native is disabled.
+        color = QColorDialog.getColor(
+            QColor(self._hex), self, "Choose color",
+            QColorDialog.ColorDialogOption.DontUseNativeDialog,
+        )
+        if color.isValid():
+            self.set_color(color.name())
+            self.color_changed.emit(color.name())
+
+
+class StyleEditorWidget(QWidget):
+    """Edits a (MarkerStyle, LabelStyle, connector settings) triple in place and emits
+    `changed` after every edit. Used both for the global preset and for a per-object
+    override — the caller decides what object backs get_marker/get_label/etc."""
+
+    changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+
+        marker_group = QGroupBox("Marker")
+        marker_form = QFormLayout(marker_group)
+        self.marker_shape = QComboBox()
+        # Per user request: only these two shapes are offered (Circle stays the
+        # default). The model/renderer still support every MarkerShape value --
+        # this only narrows what's newly selectable, so a project file saved before
+        # this restriction with a different shape still renders exactly as saved.
+        for shape in (MarkerShape.CIRCLE, MarkerShape.BRACKETS):
+            self.marker_shape.addItem(shape.value.capitalize(), shape)
+        self.marker_color = ColorButton()
+        self.marker_stroke = DarkDoubleSpinBox()
+        self.marker_stroke.setRange(0.2, 10.0)
+        self.marker_stroke.setSingleStep(0.2)
+        self.marker_radius = DarkDoubleSpinBox()
+        self.marker_radius.setRange(2.0, 500.0)
+        self.marker_opacity = DarkDoubleSpinBox()
+        self.marker_opacity.setRange(0.05, 1.0)
+        self.marker_opacity.setSingleStep(0.05)
+        self.marker_size_from_angular = QCheckBox("Scale with angular size")
+        marker_form.addRow("Shape", self.marker_shape)
+        marker_form.addRow("Color", self.marker_color)
+        marker_form.addRow("Stroke width", self.marker_stroke)
+        marker_form.addRow("Radius", self.marker_radius)
+        marker_form.addRow("Opacity", self.marker_opacity)
+        marker_form.addRow(self.marker_size_from_angular)
+
+        label_group = QGroupBox("Label")
+        label_form = QFormLayout(label_group)
+        self.font_family = QFontComboBox()
+        self.font_size = DarkDoubleSpinBox()
+        self.font_size.setRange(6.0, 96.0)
+        self.font_bold = QCheckBox("Bold")
+        self.font_italic = QCheckBox("Italic")
+        self.text_color = ColorButton()
+        self.name_display = QComboBox()
+        for mode in NameDisplayMode:
+            self.name_display.addItem(mode.value.replace("_", " ").title(), mode)
+        label_form.addRow("Font", self.font_family)
+        label_form.addRow("Size", self.font_size)
+        style_row = QHBoxLayout()
+        style_row.addWidget(self.font_bold)
+        style_row.addWidget(self.font_italic)
+        label_form.addRow(style_row)
+        label_form.addRow("Text color", self.text_color)
+        label_form.addRow("Name display", self.name_display)
+
+        bg_group = QGroupBox("Background")
+        bg_form = QFormLayout(bg_group)
+        self.background_mode = QComboBox()
+        for mode in BackgroundMode:
+            self.background_mode.addItem(mode.value.capitalize(), mode)
+        self.background_color = ColorButton("#101015")
+        # Default per user request: label backgrounds match their catalog's color
+        # unless a custom color is explicitly chosen (mirrors marker/connector
+        # precedence -- see renderer.compute_label_geometry). Unchecking reveals the
+        # color button below it for a manual override.
+        self.background_color_inherit_check = QCheckBox("Match catalog color")
+        self.background_color_inherit_check.setChecked(True)
+        self.background_color.setEnabled(False)
+        self.background_color_inherit_check.toggled.connect(
+            lambda checked: self.background_color.setEnabled(not checked)
+        )
+        self.background_opacity = DarkDoubleSpinBox()
+        self.background_opacity.setRange(0.0, 1.0)
+        self.background_opacity.setSingleStep(0.05)
+        self.padding = DarkDoubleSpinBox()
+        self.padding.setRange(0.0, 40.0)
+        self.corner_radius = DarkDoubleSpinBox()
+        self.corner_radius.setRange(0.0, 40.0)
+        bg_form.addRow("Mode", self.background_mode)
+        bg_form.addRow(self.background_color_inherit_check)
+        bg_form.addRow("Color", self.background_color)
+        bg_form.addRow("Opacity", self.background_opacity)
+        bg_form.addRow("Padding", self.padding)
+        bg_form.addRow("Corner radius", self.corner_radius)
+
+        effects_group = QGroupBox("Text effects")
+        effects_form = QFormLayout(effects_group)
+        self.outline = QCheckBox("Outline")
+        self.outline_color = ColorButton("#000000")
+        self.shadow = QCheckBox("Drop shadow")
+        self.glow = QCheckBox("Glow")
+        effects_form.addRow(self.outline, self.outline_color)
+        effects_form.addRow(self.shadow)
+        effects_form.addRow(self.glow)
+
+        connector_group = QGroupBox("Connector")
+        connector_form = QFormLayout(connector_group)
+        self.connector_enabled = QCheckBox("Show connector line")
+        self.connector_style = QComboBox()
+        for style in ConnectorStyle:
+            self.connector_style.addItem(style.value.capitalize(), style)
+        self.connector_color = ColorButton("#8a8a8a")
+        self.connector_width = DarkDoubleSpinBox()
+        self.connector_width.setRange(0.2, 6.0)
+        self.connector_width.setSingleStep(0.2)
+        connector_form.addRow(self.connector_enabled)
+        connector_form.addRow("Style", self.connector_style)
+        connector_form.addRow("Color", self.connector_color)
+        connector_form.addRow("Width", self.connector_width)
+
+        for group in (marker_group, label_group, bg_group, effects_group, connector_group):
+            layout.addWidget(group)
+        layout.addStretch(1)
+
+        self._connect_signals()
+
+    def _connect_signals(self) -> None:
+        widgets = [
+            self.marker_shape, self.marker_stroke, self.marker_radius, self.marker_opacity,
+            self.marker_size_from_angular, self.font_family, self.font_size, self.font_bold,
+            self.font_italic, self.name_display, self.background_mode,
+            self.background_color_inherit_check, self.background_opacity,
+            self.padding, self.corner_radius, self.outline, self.shadow, self.glow,
+            self.connector_enabled, self.connector_style, self.connector_width,
+        ]
+        for w in widgets:
+            signal = getattr(w, "currentIndexChanged", None) or getattr(w, "valueChanged", None) or getattr(w, "toggled", None)
+            if signal:
+                signal.connect(self.changed)
+        for btn in (self.marker_color, self.text_color, self.background_color, self.outline_color, self.connector_color):
+            btn.color_changed.connect(lambda _c: self.changed.emit())
+
+    def load(self, marker: MarkerStyle, label: LabelStyle, connector_style: ConnectorStyle, connector_color: str, connector_width: float, connector_enabled_default: bool = True) -> None:
+        block = self.blockSignals(True)
+        self.marker_shape.setCurrentIndex(self.marker_shape.findData(marker.shape))
+        self.marker_color.set_color(marker.color)
+        self.marker_stroke.setValue(marker.stroke_width)
+        self.marker_radius.setValue(marker.radius)
+        self.marker_opacity.setValue(marker.opacity)
+        self.marker_size_from_angular.setChecked(marker.size_from_angular_size)
+
+        self.font_family.setCurrentFont(QFont(label.font_family))
+        self.font_size.setValue(label.font_size)
+        self.font_bold.setChecked(label.bold)
+        self.font_italic.setChecked(label.italic)
+        self.text_color.set_color(label.text_color)
+        self.name_display.setCurrentIndex(self.name_display.findData(label.name_display))
+
+        self.background_mode.setCurrentIndex(self.background_mode.findData(label.background_mode))
+        inherit = label.background_color is None
+        self.background_color_inherit_check.setChecked(inherit)
+        self.background_color.setEnabled(not inherit)
+        if not inherit:
+            self.background_color.set_color(label.background_color)
+        self.background_opacity.setValue(label.background_opacity)
+        self.padding.setValue(label.padding)
+        self.corner_radius.setValue(label.corner_radius)
+
+        self.outline.setChecked(label.outline)
+        self.outline_color.set_color(label.outline_color)
+        self.shadow.setChecked(label.shadow)
+        self.glow.setChecked(label.glow)
+
+        self.connector_enabled.setChecked(connector_enabled_default)
+        self.connector_style.setCurrentIndex(self.connector_style.findData(connector_style))
+        self.connector_color.set_color(connector_color)
+        self.connector_width.setValue(connector_width)
+        self.blockSignals(block)
+
+    def marker_style(self) -> MarkerStyle:
+        return MarkerStyle(
+            shape=self.marker_shape.currentData(),
+            color=self.marker_color.hex_color,
+            stroke_width=self.marker_stroke.value(),
+            radius=self.marker_radius.value(),
+            opacity=self.marker_opacity.value(),
+            size_from_angular_size=self.marker_size_from_angular.isChecked(),
+        )
+
+    def label_style(self) -> LabelStyle:
+        return LabelStyle(
+            font_family=self.font_family.currentFont().family(),
+            font_size=self.font_size.value(),
+            bold=self.font_bold.isChecked(),
+            italic=self.font_italic.isChecked(),
+            text_color=self.text_color.hex_color,
+            background_mode=self.background_mode.currentData(),
+            background_color=(
+                None if self.background_color_inherit_check.isChecked() else self.background_color.hex_color
+            ),
+            background_opacity=self.background_opacity.value(),
+            padding=self.padding.value(),
+            corner_radius=self.corner_radius.value(),
+            outline=self.outline.isChecked(),
+            outline_color=self.outline_color.hex_color,
+            shadow=self.shadow.isChecked(),
+            glow=self.glow.isChecked(),
+            name_display=self.name_display.currentData(),
+        )
+
+    def connector_style_value(self) -> ConnectorStyle:
+        return self.connector_style.currentData()
+
+    def connector_color_value(self) -> str:
+        return self.connector_color.hex_color
+
+    def connector_width_value(self) -> float:
+        return self.connector_width.value()
+
+    def connector_enabled_value(self) -> bool:
+        return self.connector_enabled.isChecked()
+
+
+class StylePanel(QWidget):
+    global_style_changed = pyqtSignal()
+    object_style_changed = pyqtSignal(str)  # annotation id
+    object_meta_changed = pyqtSignal(str)  # annotation id
+    reset_style_requested = pyqtSignal()
+    catalog_color_changed = pyqtSignal(str, str)  # catalog key, new hex color
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._global_style: StylePreset | None = None
+        self._selected: Annotation | None = None
+        self._catalog_colors: dict[str, str] = {}
+
+        layout = QVBoxLayout(self)
+        preset_row = QHBoxLayout()
+        self.preset_combo = QComboBox()
+        self.save_preset_btn = QPushButton("Save As…")
+        self.delete_preset_btn = QPushButton("Delete")
+        # Selecting a preset from the combo applies its *raw* stored values -- for a
+        # high-resolution image that's a step backwards from the resolution-scaled
+        # default this app normally starts with, since presets aren't resolution-aware.
+        # Confirmed by a real report: after switching to a smaller-marker preset, the
+        # user had no way back to "the good default", since re-selecting Minimal Modern
+        # from this same combo just reapplies its flat, un-scaled values. This button
+        # recomputes the actual per-image default (main_window's default_preset_for_image)
+        # instead of merely re-selecting a preset.
+        self.reset_style_btn = QPushButton("Reset to Default")
+        preset_row.addWidget(QLabel("Preset"))
+        preset_row.addWidget(self.preset_combo, 1)
+        preset_row.addWidget(self.save_preset_btn)
+        preset_row.addWidget(self.delete_preset_btn)
+        preset_row.addWidget(self.reset_style_btn)
+        layout.addLayout(preset_row)
+
+        self.tabs = QTabWidget()
+        self.global_editor = StyleEditorWidget()
+        self.object_editor = StyleEditorWidget()
+        self.object_tab = QWidget()
+        object_tab_layout = QVBoxLayout(self.object_tab)
+        self.object_placeholder = QLabel("No object selected.")
+        self.object_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.custom_name_label = QLabel("Custom display name / notes")
+        # Multi-line so the user can write a longer description if they want (renders
+        # as a multi-line label on the canvas/export, not just a single-line name) --
+        # a QLineEdit was too cramped for that. Pre-filled with the object's current
+        # effective name as real, editable text (see set_selected_annotation) so typing
+        # extends/edits that name in place instead of starting from nothing.
+        self.custom_name_edit = QPlainTextEdit()
+        self.custom_name_edit.setFixedHeight(70)
+        self.custom_name_edit.setPlaceholderText("Leave blank to use the catalog/common name")
+        self.priority_spin = DarkSpinBox()
+        self.priority_spin.setRange(0, 100)
+        self.locked_check = QCheckBox("Locked (excluded from Auto Arrange)")
+        self.use_global_check = QCheckBox("Use global style for this object")
+        object_tab_layout.addWidget(self.object_placeholder)
+        object_tab_layout.addWidget(self.custom_name_label)
+        object_tab_layout.addWidget(self.custom_name_edit)
+        priority_row = QHBoxLayout()
+        priority_row.addWidget(QLabel("Priority"))
+        priority_row.addWidget(self.priority_spin)
+        object_tab_layout.addLayout(priority_row)
+        object_tab_layout.addWidget(self.locked_check)
+        object_tab_layout.addWidget(self.use_global_check)
+        object_tab_layout.addWidget(self.object_editor)
+
+        # Per-catalog marker/connector color (brief: "each catalog should have its own
+        # color... modify the Marker and Connector"). One swatch per catalog, defaulting
+        # to DEFAULT_CATALOG_COLORS the first time the app ever runs and to whatever the
+        # user last set after that (main_window wires persistence via set_catalog_colors
+        # / catalog_color_changed). An object's own per-object marker override (Selected
+        # Object tab, "Use global style for this object" unchecked) still always wins
+        # over its catalog's color -- see renderer.compute_marker_geometry.
+        catalog_colors_tab = QWidget()
+        catalog_colors_layout = QFormLayout(catalog_colors_tab)
+        self.catalog_color_buttons: dict[str, ColorButton] = {}
+        for key, label in SUPPORTED_CATALOGS.items():
+            btn = ColorButton(DEFAULT_CATALOG_COLORS.get(key, "#ffffff"))
+            btn.color_changed.connect(lambda hex_color, k=key: self.catalog_color_changed.emit(k, hex_color))
+            catalog_colors_layout.addRow(label, btn)
+            self.catalog_color_buttons[key] = btn
+
+        # The style editors (Marker/Label/Background/Text effects/Connector group
+        # boxes) are taller than the dock is usually given room for -- confirmed by a
+        # real screenshot where the Connector section was cut off with no way to reach
+        # it. Wrap each tab's content in a scroll area rather than relying on the dock
+        # itself being tall enough.
+        self.tabs.addTab(_scrollable(self.global_editor), "Global Style")
+        self.tabs.addTab(_scrollable(self.object_tab), "Selected Object")
+        self.tabs.addTab(_scrollable(catalog_colors_tab), "Catalog Colors")
+        layout.addWidget(self.tabs)
+
+        self._refresh_preset_list()
+        self.preset_combo.currentIndexChanged.connect(self._apply_selected_preset)
+        self.preset_combo.currentIndexChanged.connect(self._update_delete_button_state)
+        self.save_preset_btn.clicked.connect(self._save_current_as_preset)
+        self.delete_preset_btn.clicked.connect(self._delete_current_preset)
+        self.reset_style_btn.clicked.connect(self.reset_style_requested)
+        self.global_editor.changed.connect(self._on_global_edited)
+        self.object_editor.changed.connect(self._on_object_edited)
+        self.custom_name_edit.textChanged.connect(self._on_object_meta_edited)
+        self.priority_spin.valueChanged.connect(self._on_object_meta_edited)
+        self.locked_check.toggled.connect(self._on_object_meta_edited)
+        self.use_global_check.toggled.connect(self._on_use_global_toggled)
+
+        self.set_selected_annotation(None)
+
+    def _refresh_preset_list(self) -> None:
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        for name in preset_store.all_presets():
+            self.preset_combo.addItem(name)
+        self.preset_combo.blockSignals(False)
+        self._update_delete_button_state()
+
+    def _update_delete_button_state(self) -> None:
+        # Minimal Modern (and any other built-in) can never be deleted -- it's the
+        # guaranteed fallback a user always has a way back to.
+        name = self.preset_combo.currentText()
+        self.delete_preset_btn.setEnabled(bool(name) and name not in preset_store.BUILTIN_PRESETS)
+
+    def show_object_tab(self) -> None:
+        """Switches to "Selected Object" (index 1 -- see the addTab order above) so a
+        double-click on the canvas lands the user directly on that object's own
+        controls instead of wherever the Style tab happened to be left."""
+        self.tabs.setCurrentIndex(1)
+
+    def set_catalog_colors(self, colors: dict[str, str]) -> None:
+        # Kept (not just applied to the swatches below) so set_selected_annotation can
+        # show a not-yet-overridden object's *actual* rendered marker/connector color
+        # (its catalog's color) instead of the flat global default -- see
+        # resolve_marker_color/resolve_connector_color.
+        self._catalog_colors = colors
+        for key, btn in self.catalog_color_buttons.items():
+            color = colors.get(key)
+            if color:
+                btn.blockSignals(True)
+                btn.set_color(color)
+                btn.blockSignals(False)
+
+    def set_global_style(self, style: StylePreset) -> None:
+        self._global_style = style
+        self.global_editor.load(
+            style.marker_style, style.label_style, style.connector_style,
+            style.connector_color, style.connector_width,
+        )
+
+    def global_style(self) -> StylePreset:
+        assert self._global_style is not None
+        return self._global_style
+
+    def set_selected_annotation(self, annotation: Annotation | None) -> None:
+        self._selected = annotation
+        has_selection = annotation is not None
+        self.object_placeholder.setVisible(not has_selection)
+        self.object_editor.setVisible(has_selection)
+        self.custom_name_label.setVisible(has_selection)
+        self.custom_name_edit.setVisible(has_selection)
+        self.locked_check.setVisible(has_selection)
+        self.use_global_check.setVisible(has_selection)
+        self.priority_spin.setVisible(has_selection)
+        if not has_selection:
+            return
+        # Pre-fill with the object's actual current name as real, editable text (not
+        # placeholder text) -- per user request, so starting to type adds to/edits the
+        # existing name in place instead of the field looking pre-filled but actually
+        # being empty, which silently discarded the original name the moment you typed
+        # anything. blockSignals still guards against merely *selecting* an object
+        # committing this text as a custom_display_name override on its own; only an
+        # actual edit (any keystroke, via _on_object_meta_edited) commits it.
+        name_mode = self._global_style.label_style.name_display if self._global_style else NameDisplayMode.CATALOG_ONLY
+        self.custom_name_edit.blockSignals(True)
+        self.custom_name_edit.setPlainText(annotation.custom_display_name or annotation.display_name(name_mode))
+        self.custom_name_edit.blockSignals(False)
+        # priority_spin/locked_check must also be blocked while syncing them to the
+        # newly-selected object: both are wired to _on_object_meta_edited, which reads
+        # *all three* fields (including custom_name_edit) via pending_object_meta_values
+        # and commits them as a single meta update. Previously custom_name_edit's real
+        # text was always empty on selection, so an unblocked setValue/setChecked firing
+        # here was a harmless no-op (committed custom_display_name=None over None) --
+        # but now that the field is pre-filled with real text, the same unblocked signal
+        # would silently commit that name as a real override just from selecting an
+        # object whose priority/locked state happens to differ from the previous one.
+        self.priority_spin.blockSignals(True)
+        self.priority_spin.setValue(annotation.priority)
+        self.priority_spin.blockSignals(False)
+        self.locked_check.blockSignals(True)
+        self.locked_check.setChecked(annotation.locked)
+        self.locked_check.blockSignals(False)
+        has_override = (
+            annotation.marker_style is not None
+            or annotation.label_style is not None
+            or annotation.connector_style is not None
+            or annotation.connector_color is not None
+            or annotation.connector_width is not None
+        )
+        # blockSignals is essential here, not decorative -- _on_use_global_toggled
+        # (wired to this checkbox's toggled signal) emits object_style_changed, which
+        # commits whatever pending_object_style_values() reads *right now* from
+        # object_editor's widgets. But object_editor.load() below -- which is what
+        # actually re-populates those widgets for the newly-selected object -- hasn't
+        # run yet at this point in the method. Left unblocked, a real state transition
+        # here (e.g. re-selecting an overridden object right after a different one with
+        # a different override state) would fire _on_use_global_toggled with the STALE,
+        # previous object's values still sitting in the editor, silently clobbering the
+        # newly-selected object's real override with garbage -- a real, confirmed
+        # report: a per-object Brackets shape override reverted to Circle after
+        # deselecting and reselecting the same object.
+        self.use_global_check.blockSignals(True)
+        self.use_global_check.setChecked(not has_override)
+        self.use_global_check.blockSignals(False)
+        self.object_editor.setEnabled(has_override)
+        # Marker/connector *color* specifically is resolved through catalog_colors,
+        # not just "override or flat global default" -- otherwise a not-yet-overridden
+        # object's editor showed the flat global color (e.g. white) instead of the
+        # catalog pastel actually rendered for it, and unchecking "Use global style"
+        # would silently commit that flat color as a real override the instant it was
+        # unchecked, before the user touched anything (a real, confirmed report).
+        marker = annotation.marker_style or self._global_style.marker_style
+        marker = replace(marker, color=resolve_marker_color(annotation, self._global_style, self._catalog_colors))
+        label = annotation.label_style or self._global_style.label_style
+        self.object_editor.load(
+            marker, label,
+            annotation.effective_connector_style(self._global_style),
+            resolve_connector_color(annotation, self._global_style, self._catalog_colors),
+            annotation.effective_connector_width(self._global_style),
+            connector_enabled_default=annotation.connector_enabled,
+        )
+
+    def _apply_selected_preset(self) -> None:
+        name = self.preset_combo.currentText()
+        preset = preset_store.all_presets().get(name)
+        if preset:
+            self.set_global_style(replace(preset, name=self._global_style.name if self._global_style else preset.name))
+            self.global_style_changed.emit()
+
+    def _save_current_as_preset(self) -> None:
+        name, ok = QInputDialog.getText(self, "Save Preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        preset = replace(
+            self.global_style(),
+            name=name.strip(),
+            marker_style=self.global_editor.marker_style(),
+            label_style=self.global_editor.label_style(),
+            connector_style=self.global_editor.connector_style_value(),
+            connector_color=self.global_editor.connector_color_value(),
+            connector_width=self.global_editor.connector_width_value(),
+        )
+        preset_store.save_user_preset(preset)
+        self._refresh_preset_list()
+        self.preset_combo.setCurrentText(name.strip())
+
+    def _delete_current_preset(self) -> None:
+        name = self.preset_combo.currentText()
+        if not name or name in preset_store.BUILTIN_PRESETS:
+            return  # Minimal Modern (or any future built-in) is never deletable.
+        reply = QMessageBox.question(
+            self, "Delete Preset", f'Delete the preset "{name}"? This cannot be undone.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        preset_store.delete_user_preset(name)
+        self._refresh_preset_list()
+        # The deleted preset was the one currently applied (it's the only thing this
+        # combo can be showing), so fall back to Minimal Modern immediately per user
+        # request -- but via reset_style_requested (main_window's resolution-scaled
+        # "Reset to Default", the same path the Reset button uses), not by just
+        # re-selecting "Minimal Modern" here: re-selecting would apply its *raw*,
+        # un-scaled values, which on a high-resolution image looks just as broken as
+        # the "Scientific"-preset regression that button was built to fix. Block
+        # signals while updating the combo display so _apply_selected_preset doesn't
+        # also fire and push a redundant, briefly-wrong intermediate style.
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.setCurrentText(preset_store.DEFAULT_PRESET_NAME)
+        self.preset_combo.blockSignals(False)
+        self._update_delete_button_state()
+        self.reset_style_requested.emit()
+
+    def _on_global_edited(self) -> None:
+        if self._global_style is None:
+            return
+        self._global_style = replace(
+            self._global_style,
+            marker_style=self.global_editor.marker_style(),
+            label_style=self.global_editor.label_style(),
+            connector_style=self.global_editor.connector_style_value(),
+            connector_color=self.global_editor.connector_color_value(),
+            connector_width=self.global_editor.connector_width_value(),
+        )
+        self.global_style_changed.emit()
+
+    def pending_object_style_values(self) -> dict:
+        """Read by MainWindow after object_style_changed fires — this widget never
+        mutates the Annotation directly, so undo/redo has a clean old/new snapshot.
+        connector_style/color/width are included alongside marker_style/label_style --
+        real gap this fixes: the Connector group in the "Selected Object" tab's editor
+        was fully interactive but silently did nothing, since Annotation had no fields
+        to capture those values into at all."""
+        if self.use_global_check.isChecked():
+            return {
+                "marker_style": None, "label_style": None,
+                "connector_style": None, "connector_color": None, "connector_width": None,
+            }
+        return {
+            "marker_style": self.object_editor.marker_style(),
+            "label_style": self.object_editor.label_style(),
+            "connector_enabled": self.object_editor.connector_enabled_value(),
+            "connector_style": self.object_editor.connector_style_value(),
+            "connector_color": self.object_editor.connector_color_value(),
+            "connector_width": self.object_editor.connector_width_value(),
+        }
+
+    def pending_object_meta_values(self) -> dict:
+        return {
+            "custom_display_name": self.custom_name_edit.toPlainText().strip() or None,
+            "priority": self.priority_spin.value(),
+            "locked": self.locked_check.isChecked(),
+        }
+
+    def _on_object_edited(self) -> None:
+        if self._selected is None or self.use_global_check.isChecked():
+            return
+        self.object_style_changed.emit(self._selected.id)
+
+    def _on_object_meta_edited(self, *_args) -> None:
+        if self._selected is None:
+            return
+        self.object_meta_changed.emit(self._selected.id)
+
+    def _on_use_global_toggled(self, checked: bool) -> None:
+        if self._selected is None:
+            return
+        self.object_editor.setEnabled(not checked)
+        self.object_style_changed.emit(self._selected.id)

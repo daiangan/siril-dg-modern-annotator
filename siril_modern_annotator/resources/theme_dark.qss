@@ -1,0 +1,226 @@
+/* Siril Modern Annotator — dark theme (brief #4, #37) */
+
+* {
+    /* "Inter" isn't bundled with either macOS or Windows by default -- it silently
+       substituted on both, just loudly (a Qt console warning) on macOS and quietly
+       (fell back to Tahoma) on Windows. "Verdana" ships with both out of the box, so
+       this actually renders as chosen instead of an invisible fallback. The
+       OS-specific names that used to follow it here ("Segoe UI", "Helvetica Neue")
+       are deliberately gone too -- each one is missing on whichever platform it isn't
+       native to, so Qt logs the same "missing font family" warning for it there;
+       since Verdana alone already covers both platforms, they were dead weight that
+       only generated console noise. Plain "sans-serif" stays as a generic (not a
+       specific font) last-resort, which Qt always resolves without warning. */
+    font-family: "Verdana", sans-serif;
+    font-size: 12px;
+}
+
+/* border: none is deliberate, not decorative -- on Windows, a top-level QDialog can
+   fall back to native/light background painting and ignore a QSS background-color
+   that has no other box-model property set alongside it (a known Qt-on-Windows
+   quirk). QColorDialog is exactly this case: it's a QDialog with no border of its
+   own, so without this it could keep rendering light on Windows even with
+   DontUseNativeDialog forcing Qt's own (not the OS's) dialog implementation --
+   see gui/style_panel.py's ColorButton._pick(). */
+QMainWindow, QDialog, QWidget {
+    background-color: #1a1b1e;
+    color: #e6e6e6;
+    border: none;
+}
+
+QToolBar {
+    background-color: #202124;
+    border: none;
+    padding: 4px;
+    spacing: 6px;
+}
+
+QDockWidget {
+    titlebar-close-icon: none;
+}
+
+QDockWidget::title {
+    background: #202124;
+    padding: 6px;
+    font-weight: 600;
+    color: #a8adb5;
+}
+
+QTabWidget::pane {
+    border: 1px solid #2c2d31;
+    background: #1e1f22;
+}
+
+QTabBar::tab {
+    background: #202124;
+    color: #a8adb5;
+    padding: 6px 14px;
+    border: 1px solid #2c2d31;
+    border-bottom: none;
+}
+
+QTabBar::tab:selected {
+    background: #1e1f22;
+    color: #ffffff;
+}
+
+QPushButton {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c41;
+    border-radius: 4px;
+    padding: 5px 12px;
+    color: #e6e6e6;
+}
+
+QPushButton:hover {
+    background-color: #34363b;
+    border-color: #4a4d54;
+}
+
+QPushButton:pressed {
+    background-color: #232427;
+}
+
+QToolButton {
+    background-color: #2a2c30;
+    border: 1px solid #3a3c41;
+    border-radius: 4px;
+    padding: 5px 12px;
+    color: #e6e6e6;
+}
+
+QToolButton:hover {
+    background-color: #34363b;
+    border-color: #4a4d54;
+}
+
+QToolButton:pressed, QToolButton[popupMode="1"]:open {
+    background-color: #232427;
+}
+
+/* The dropdown arrow is a plain character in the button's own text (see
+   gui/main_window.py) rather than this native indicator -- subcontrol-position/-origin
+   for menu-indicator rendered inconsistently across platform styles and could overlap
+   the text (confirmed by a real screenshot). Disabling it here avoids drawing two
+   arrows or leaving stray reserved space now that the indicator is gone. */
+QToolButton::menu-indicator {
+    image: none;
+    width: 0px;
+}
+
+/* QPlainTextEdit (the custom display name / notes box) is included here too --
+   without it, it only matched the generic QMainWindow/QDialog/QWidget rule above,
+   which lost its own visible border the moment that rule picked up `border: none`
+   (needed elsewhere, for QColorDialog on Windows -- see that rule's comment).
+   Confirmed by a real report: the notes box border disappeared entirely. */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QFontComboBox, QPlainTextEdit {
+    background-color: #26272b;
+    border: 1px solid #3a3c41;
+    border-radius: 3px;
+    padding: 3px 6px;
+    color: #e6e6e6;
+    selection-background-color: #3a6ea5;
+}
+
+QComboBox::drop-down {
+    border: none;
+}
+
+/* Once a stylesheet touches QSpinBox/QDoubleSpinBox at all (the rule above does, via
+   background-color/border/padding), Qt stops relying on the native style to lay out
+   and paint the up/down buttons -- without explicit subcontrol rules here, those
+   buttons can end up with no real clickable geometry at all. Confirmed by a real
+   report: every increment/decrement arrow in the Style tab did nothing on click. The
+   arrow *glyphs* themselves are deliberately NOT styled here via ::up-arrow/::down-
+   arrow -- confirmed by direct testing that Qt's QSS engine does not reliably render
+   the "zero-size box, visible only via its borders" CSS triangle technique (every
+   variation tried painted either nothing or a solid bar, never a triangle), and once
+   these button subcontrols are styled at all, Qt's native arrow fallback stops
+   drawing anything there either. gui/widgets.py's DarkSpinBox/DarkDoubleSpinBox paint
+   the actual triangle glyphs themselves via QPainter instead, using the exact
+   subcontrol rects this stylesheet defines below. */
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 16px;
+    border-left: 1px solid #3a3c41;
+    border-bottom: 1px solid #3a3c41;
+    border-top-right-radius: 3px;
+    background-color: #2a2c30;
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 16px;
+    border-left: 1px solid #3a3c41;
+    border-bottom-right-radius: 3px;
+    background-color: #2a2c30;
+}
+
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background-color: #34363b;
+}
+
+QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {
+    background-color: #232427;
+}
+
+QGroupBox {
+    border: 1px solid #2c2d31;
+    border-radius: 5px;
+    margin-top: 10px;
+    padding-top: 8px;
+    font-weight: 600;
+    color: #a8adb5;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+}
+
+QTableView {
+    background-color: #1e1f22;
+    alternate-background-color: #202124;
+    gridline-color: #2c2d31;
+    selection-background-color: #3a6ea5;
+    selection-color: #ffffff;
+    border: 1px solid #2c2d31;
+}
+
+QHeaderView::section {
+    background-color: #202124;
+    color: #a8adb5;
+    padding: 4px;
+    border: none;
+    border-right: 1px solid #2c2d31;
+}
+
+QStatusBar {
+    background-color: #202124;
+    color: #a8adb5;
+}
+
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #1a1b1e;
+    width: 12px;
+    height: 12px;
+}
+
+QScrollBar::handle {
+    background: #3a3c41;
+    border-radius: 5px;
+    min-height: 24px;
+}
+
+QScrollBar::handle:hover {
+    background: #4a4d54;
+}
+
+QCheckBox {
+    spacing: 6px;
+}

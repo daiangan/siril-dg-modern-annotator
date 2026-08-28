@@ -1,0 +1,4 @@
+name,ra,dec,pmra,pmdec,mag,alias
+ksi Cyg,310.02,41.01,0,0,3.7,
+alf Sco,309.98,40.99,0,0,1.0,Antares
+HD-TEST-NOPREFIX,310.03,40.97,0,0,8.0,

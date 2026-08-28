@@ -1,0 +1,11 @@
+# Development-only dependencies for running Siril Modern Annotator's test suite and
+# for local development outside Siril. Siril itself provides sirilpy and, via
+# sirilpy.ensure_installed() (see modern_annotator.py), the runtime dependencies below
+# when the script actually runs inside Siril -- this file is NOT what Siril uses.
+numpy>=1.20.0
+astropy>=5.3
+astroquery>=0.4
+Pillow>=10.0
+tifffile>=2021.7
+PyQt6>=6.4
+pytest>=7.0

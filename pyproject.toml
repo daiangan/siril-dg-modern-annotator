@@ -1,0 +1,9 @@
+[project]
+name = "siril-modern-annotator"
+version = "0.1.0"
+description = "Modern interactive astronomical annotation tool for Siril"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["siril_modern_annotator/tests"]
