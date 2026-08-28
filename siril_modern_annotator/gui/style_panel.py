@@ -360,7 +360,8 @@ class StylePanel(QWidget):
         object_tab_layout.addWidget(self.custom_name_label)
         object_tab_layout.addWidget(self.custom_name_edit)
         priority_row = QHBoxLayout()
-        priority_row.addWidget(QLabel("Priority"))
+        self.priority_label = QLabel("Priority")
+        priority_row.addWidget(self.priority_label)
         priority_row.addWidget(self.priority_spin)
         object_tab_layout.addLayout(priority_row)
         object_tab_layout.addWidget(self.locked_check)
@@ -462,6 +463,7 @@ class StylePanel(QWidget):
         self.locked_check.setVisible(has_selection)
         self.use_global_check.setVisible(has_selection)
         self.priority_spin.setVisible(has_selection)
+        self.priority_label.setVisible(has_selection)
         if not has_selection:
             return
         # Pre-fill with the object's actual current name as real, editable text (not
