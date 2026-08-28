@@ -23,6 +23,7 @@ on every build.
 
 from __future__ import annotations
 
+import base64
 import shutil
 from pathlib import Path
 
@@ -42,8 +43,13 @@ SIRIL_SCRIPTS_DIR = Path("/Users/daiangan/siril/scripts")
 
 _RESOURCES_INIT_TEMPLATE = '''"""Bundled resources (single-file build: embedded, not read from disk)."""
 
+import base64
+
 def load_dark_stylesheet() -> str:
     return {stylesheet!r}
+
+def load_app_icon_png_bytes() -> bytes:
+    return base64.b64decode({icon_b64!r})
 '''
 
 _HEADER_TEMPLATE = '''#!/usr/bin/env python3
@@ -104,6 +110,8 @@ def collect_modules() -> tuple[dict[str, str], list[str]]:
     packages: list[str] = []
     stylesheet_path = PACKAGE_ROOT / "resources" / "theme_dark.qss"
     stylesheet_text = stylesheet_path.read_text(encoding="utf-8")
+    icon_path = PACKAGE_ROOT / "resources" / "icon.png"
+    icon_b64 = base64.b64encode(icon_path.read_bytes()).decode("ascii")
 
     for path in sorted(PACKAGE_ROOT.rglob("*.py")):
         rel_parts = path.relative_to(PACKAGE_ROOT).parts
@@ -111,7 +119,7 @@ def collect_modules() -> tuple[dict[str, str], list[str]]:
             continue
         name, is_package = _module_name_and_kind(path)
         if name == "siril_modern_annotator.resources":
-            source = _RESOURCES_INIT_TEMPLATE.format(stylesheet=stylesheet_text)
+            source = _RESOURCES_INIT_TEMPLATE.format(stylesheet=stylesheet_text, icon_b64=icon_b64)
         else:
             source = path.read_text(encoding="utf-8")
         modules[name] = source

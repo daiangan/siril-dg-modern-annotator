@@ -61,16 +61,26 @@ def main() -> int:
         logger.debug("Could not write the startup banner to Siril's log.", exc_info=True)
 
     # Deferred until after ensure_installed() has run.
+    from PyQt6.QtGui import QIcon, QPixmap
     from PyQt6.QtWidgets import QApplication
 
     from .gui.main_window import MainWindow
-    from .resources import load_dark_stylesheet
+    from .resources import load_app_icon_png_bytes, load_dark_stylesheet
 
     app = QApplication(sys.argv)
     try:
         app.setStyleSheet(load_dark_stylesheet())
     except OSError:
         logger.warning("Dark theme stylesheet not found; using Qt default styling.")
+
+    try:
+        pixmap = QPixmap()
+        pixmap.loadFromData(load_app_icon_png_bytes())
+        app.setWindowIcon(QIcon(pixmap))
+    except OSError:
+        # Purely cosmetic (Dock/taskbar icon) -- must never block the app over a
+        # missing icon.png.
+        logger.debug("App icon not found; using the default Python icon.", exc_info=True)
 
     window = MainWindow(bridge)
     window.show()
