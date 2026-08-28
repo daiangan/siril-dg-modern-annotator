@@ -69,6 +69,7 @@ from .export_dialog import ExportDialog
 from .image_view import ImageView
 from .object_panel import ObjectPanel
 from .style_panel import StylePanel
+from .tools_panel import ToolsPanel
 from .workers import CatalogFetchWorker, ExportWorker
 
 logger = logging.getLogger(__name__)
@@ -189,9 +190,15 @@ class MainWindow(QMainWindow):
         self.style_panel.reset_compass_position_requested.connect(self._reset_compass_position)
         self.style_panel.set_overlay_settings(self.overlay_settings)
 
+        self.tools_panel = ToolsPanel()
+        self.tools_panel.auto_arrange_requested.connect(self.run_auto_arrange)
+        self.tools_panel.save_layout_requested.connect(self.save_project)
+        self.tools_panel.load_layout_requested.connect(self.load_project)
+
         self.dock_tabs = QTabWidget()
         self.dock_tabs.addTab(self.object_panel, "Objects")
         self.dock_tabs.addTab(self.style_panel, "Style")
+        self.dock_tabs.addTab(self.tools_panel, "Tools")
         dock = QDockWidget("Annotation Controls", self)
         dock.setWidget(self.dock_tabs)
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
@@ -289,20 +296,10 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(overlays_btn)
         toolbar.addSeparator()
 
-        auto_arrange_btn = QPushButton("Auto Arrange Labels")
-        auto_arrange_btn.clicked.connect(self.run_auto_arrange)
-        toolbar.addWidget(auto_arrange_btn)
-        toolbar.addSeparator()
+        # Auto Arrange Labels / Save Layout / Load Layout moved to the "Tools" dock tab
+        # (see gui/tools_panel.py) -- per user request, to keep this toolbar simple.
 
-        save_btn = QPushButton("Save Layout")
-        save_btn.clicked.connect(self.save_project)
-        load_btn = QPushButton("Load Layout")
-        load_btn.clicked.connect(self.load_project)
-        toolbar.addWidget(save_btn)
-        toolbar.addWidget(load_btn)
-        toolbar.addSeparator()
-
-        # Per user request: ordered last (Save Layout / Load Layout / Export), with a
+        # Per user request: ordered last (Export), with a
         # distinct accent color so the primary "finish and save your work" action still
         # stands out from the neutral gray toolbar buttons around it.
         export_btn = QPushButton("Export")
