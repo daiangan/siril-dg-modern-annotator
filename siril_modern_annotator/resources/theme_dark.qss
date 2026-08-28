@@ -35,6 +35,16 @@ QToolBar {
     spacing: 6px;
 }
 
+/* Without this, QLabel picks up the generic QWidget background-color above (#1a1b1e)
+   as its own opaque fill -- a shade darker than whatever bar it actually sits on
+   (QToolBar's #202124, QStatusBar's #202124), so every label reads as a mismatched
+   dark patch behind its text instead of blending into the bar (reported: "Preview:"
+   and the object-count label in the toolbar). Transparent lets it show the parent's
+   background instead of painting its own. */
+QLabel {
+    background-color: transparent;
+}
+
 QDockWidget {
     titlebar-close-icon: none;
 }
