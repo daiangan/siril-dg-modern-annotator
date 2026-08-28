@@ -88,45 +88,75 @@ class LabeledSlider(QWidget):
     marker's Radius X / Radius Y / Rotation controls (per user report: clicking a
     spinbox's tiny increment arrows repeatedly to visually fit an oval around a real
     galaxy was uncomfortable; dragging a slider is the natural interaction for "adjust
-    this until it looks right"). Whole-unit (integer) precision only -- sub-pixel
-    radius or sub-degree rotation precision was never needed by the spinboxes this
-    replaces either (rotation's old step was 5.0), and QSlider itself is integer-only.
+    this until it looks right").
 
     Exposes the same value()/setValue()/setRange()/valueChanged surface as
     DarkDoubleSpinBox so StyleEditorWidget's existing load()/marker_style()/
     _connect_signals() code (which was written against that surface) needed no special
     casing to use this instead -- see _connect_signals()'s generic
-    getattr(w, "valueChanged", None) widget-signal detection."""
+    getattr(w, "valueChanged", None) widget-signal detection.
+
+    The underlying QSlider always spans a fixed, fine-grained internal range
+    (_STEPS) mapped to [minimum, maximum] -- NOT minimum..maximum directly as raw
+    integer slider units. A first version did use raw units directly, and for Radius
+    X/Y (2..5000) that meant ~17 native pixels per screen pixel of drag: comfortable
+    for reaching the extreme end for a huge galaxy, but far too twitchy for the small
+    adjustments needed to actually fit an oval to one -- confirmed by a real report.
+    curve="quadratic" concentrates precision at the low end of the range (where most
+    objects' actual size falls) while still reaching the high end within one drag,
+    since drag distance now maps to position along the curve, not directly to value."""
 
     valueChanged = pyqtSignal(float)
 
-    def __init__(self, minimum: float, maximum: float, suffix: str = "", parent=None):
+    _STEPS = 2000
+
+    def __init__(self, minimum: float, maximum: float, suffix: str = "", curve: str = "linear", parent=None):
         super().__init__(parent)
+        self._minimum = minimum
+        self._maximum = maximum
+        self._curve = curve
         self._suffix = suffix
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setRange(round(minimum), round(maximum))
+        self.slider.setRange(0, self._STEPS)
         self.value_label = QLabel()
         self.value_label.setMinimumWidth(52)
         self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.slider, 1)
         layout.addWidget(self.value_label)
-        self.slider.valueChanged.connect(self._on_slider_value_changed)
-        self._update_label(self.slider.value())
+        self.slider.valueChanged.connect(self._on_slider_position_changed)
+        self._update_label(self.value())
 
-    def _on_slider_value_changed(self, value: int) -> None:
+    def _position_to_value(self, position: int) -> float:
+        t = position / self._STEPS
+        if self._curve == "quadratic":
+            t = t * t
+        return self._minimum + (self._maximum - self._minimum) * t
+
+    def _value_to_position(self, value: float) -> int:
+        span = self._maximum - self._minimum
+        t = (value - self._minimum) / span if span else 0.0
+        t = min(1.0, max(0.0, t))
+        if self._curve == "quadratic":
+            t = t**0.5
+        return round(t * self._STEPS)
+
+    def _on_slider_position_changed(self, position: int) -> None:
+        value = self._position_to_value(position)
         self._update_label(value)
-        self.valueChanged.emit(float(value))
+        self.valueChanged.emit(value)
 
-    def _update_label(self, value: int) -> None:
-        self.value_label.setText(f"{value}{self._suffix}")
+    def _update_label(self, value: float) -> None:
+        self.value_label.setText(f"{round(value)}{self._suffix}")
 
     def value(self) -> float:
-        return float(self.slider.value())
+        return self._position_to_value(self.slider.value())
 
     def setValue(self, value: float) -> None:
-        self.slider.setValue(round(value))
+        self.slider.setValue(self._value_to_position(value))
 
     def setRange(self, minimum: float, maximum: float) -> None:
-        self.slider.setRange(round(minimum), round(maximum))
+        current = self.value()
+        self._minimum, self._maximum = minimum, maximum
+        self.setValue(current)

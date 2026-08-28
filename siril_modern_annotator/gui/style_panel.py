@@ -87,6 +87,16 @@ class ColorButton(QPushButton):
             self.color_changed.emit(color.name())
 
 
+def _normalize_rotation_deg(rotation_deg: float) -> float:
+    """Maps any angle onto [-90, 90) -- an ellipse rotated by theta is visually
+    identical to one rotated by theta+180 (its two ends are indistinguishable), so
+    this is lossless. Used when loading a value into marker_rotation's -90..90 slider
+    (see StyleEditorWidget.__init__) so a value from outside that range (a saved
+    project file, or any future source) still displays correctly instead of visually
+    clamping to the nearest edge and silently disagreeing with the stored value."""
+    return ((rotation_deg + 90.0) % 180.0) - 90.0
+
+
 class StyleEditorWidget(QWidget):
     """Edits a (MarkerStyle, LabelStyle, connector settings) triple in place and emits
     `changed` after every edit. Used both for the global preset and for a per-object
@@ -126,9 +136,17 @@ class StyleEditorWidget(QWidget):
         # high-resolution astrophotography frame -- the previous 500 cap (copied from
         # the circular Radius field above) left a real M31 ellipse unable to reach the
         # galaxy's actual extent, per a real report with a screenshot.
-        self.marker_radius_x = LabeledSlider(2.0, 5000.0, suffix="px")
-        self.marker_radius_y = LabeledSlider(2.0, 5000.0, suffix="px")
-        self.marker_rotation = LabeledSlider(-180.0, 180.0, suffix="°")
+        # quadratic: concentrates drag precision at the low end (2-500ish px, where
+        # most objects actually fall) while still reaching 5000px within one drag --
+        # per a real report that a plain linear mapping across this wide a range was
+        # too sensitive for the small adjustments needed to actually fit an oval.
+        self.marker_radius_x = LabeledSlider(2.0, 5000.0, suffix="px", curve="quadratic")
+        self.marker_radius_y = LabeledSlider(2.0, 5000.0, suffix="px", curve="quadratic")
+        # -90..90, not -180..180: a rotated ellipse is visually identical every 180
+        # degrees (its two ends are indistinguishable), so halving the range halves
+        # degrees-per-pixel sensitivity for free, with no loss of reachable
+        # orientations -- see _normalize_rotation_deg, used in load() below.
+        self.marker_rotation = LabeledSlider(-90.0, 90.0, suffix="°")
         self.marker_opacity = DarkDoubleSpinBox()
         self.marker_opacity.setRange(0.05, 1.0)
         self.marker_opacity.setSingleStep(0.05)
@@ -264,7 +282,7 @@ class StyleEditorWidget(QWidget):
         self.marker_radius.setValue(marker.radius)
         self.marker_radius_x.setValue(marker.radius_x)
         self.marker_radius_y.setValue(marker.radius_y)
-        self.marker_rotation.setValue(marker.rotation_deg)
+        self.marker_rotation.setValue(_normalize_rotation_deg(marker.rotation_deg))
         self.marker_opacity.setValue(marker.opacity)
         self.marker_size_from_angular.setChecked(marker.size_from_angular_size)
         self._update_marker_shape_fields_visibility()
