@@ -77,6 +77,7 @@ def qt_text_measurer(label_style_provider):
 
 
 class MarkerItem(QGraphicsObject):
+    moved = pyqtSignal(float, float)  # emits new native (x, y) marker center when drag finishes
     clicked = pyqtSignal()
     double_clicked = pyqtSignal()
     context_menu_requested = pyqtSignal(QPoint)  # screen position to pop the menu at
@@ -104,7 +105,13 @@ class MarkerItem(QGraphicsObject):
         # QGraphicsItem gates context-menu delivery on the same accepted-buttons set
         # used for mouse press/release.
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setAcceptHoverEvents(True)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setZValue(10)
+        self._sync_pos_from_model()
 
     def _geometry(self):
         return compute_marker_geometry(
@@ -112,13 +119,20 @@ class MarkerItem(QGraphicsObject):
             self.catalog_colors,
         )
 
+    def _sync_pos_from_model(self) -> None:
+        """Repositions this item to the annotation's current effective marker position
+        (image_x/image_y, or the marker_x/marker_y override) -- paint()/boundingRect()
+        below draw at local (0, 0), matching LabelItem's convention, so a drag just
+        needs Qt's own pos() to become the new override; see MainWindow._refresh_annotation."""
+        geo = self._geometry()
+        self.prepareGeometryChange()
+        self.setPos(geo.x, geo.y)
+
     def boundingRect(self) -> QRectF:
         geo = self._geometry()
         pad = geo.style.stroke_width + 2
-        return QRectF(
-            geo.x - geo.radius - pad, geo.y - geo.radius - pad,
-            2 * (geo.radius + pad), 2 * (geo.radius + pad),
-        )
+        r = geo.radius
+        return QRectF(-r - pad, -r - pad, 2 * (r + pad), 2 * (r + pad))
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
         geo = self._geometry()
@@ -130,7 +144,7 @@ class MarkerItem(QGraphicsObject):
         pen = QPen(color, style.stroke_width)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        cx, cy, r = geo.x, geo.y, geo.radius
+        cx, cy, r = 0.0, 0.0, geo.radius
 
         if style.shape is MarkerShape.CIRCLE:
             painter.drawEllipse(QPointF(cx, cy), r, r)
@@ -166,6 +180,7 @@ class MarkerItem(QGraphicsObject):
 
     def mousePressEvent(self, event):
         self.clicked.emit()
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -175,6 +190,12 @@ class MarkerItem(QGraphicsObject):
     def contextMenuEvent(self, event) -> None:
         self.context_menu_requested.emit(event.screenPos())
         event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+        pos = self.pos()
+        self.moved.emit(pos.x(), pos.y())
 
     def set_selected_visual(self, selected: bool) -> None:
         self.selected_ = selected

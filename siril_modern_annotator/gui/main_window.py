@@ -54,7 +54,14 @@ from ..persistence import presets as preset_store
 from ..persistence.project import CatalogConfig, ExportSettings, ProjectData, load, project_path_for_image, save
 from ..siril_bridge.interface import ImageInfo, NoImageLoadedError, SirilBridge, SirilBridgeError
 from .annotation_item import ConnectorItem, LabelItem, MarkerItem, qt_text_measurer
-from .commands import AnnotationFieldsCommand, AutoArrangeCommand, GlobalStyleChangeCommand, MoveLabelCommand, ToggleVisibilityCommand
+from .commands import (
+    AnnotationFieldsCommand,
+    AutoArrangeCommand,
+    GlobalStyleChangeCommand,
+    MoveLabelCommand,
+    MoveMarkerCommand,
+    ToggleVisibilityCommand,
+)
 from .export_dialog import ExportDialog
 from .image_view import ImageView
 from .object_panel import ObjectPanel
@@ -165,6 +172,7 @@ class MainWindow(QMainWindow):
         self.style_panel.object_style_changed.connect(self._on_object_style_edited)
         self.style_panel.object_meta_changed.connect(self._on_object_meta_edited)
         self.style_panel.reset_style_requested.connect(self._on_reset_global_style)
+        self.style_panel.reset_marker_position_requested.connect(self._reset_selected_marker_position)
         self.style_panel.catalog_color_changed.connect(self._on_catalog_color_changed)
 
         self.dock_tabs = QTabWidget()
@@ -555,6 +563,7 @@ class MainWindow(QMainWindow):
         connector = ConnectorItem(ann, style, self.catalog_colors)
         marker.clicked.connect(lambda a=ann: self.select_annotation(a.id))
         label.clicked.connect(lambda a=ann: self.select_annotation(a.id))
+        marker.moved.connect(lambda x, y, a=ann: self._on_marker_moved(a, x, y))
         label.moved.connect(lambda x, y, a=ann: self._on_label_moved(a, x, y))
         marker.context_menu_requested.connect(lambda pos, a=ann: self._show_object_context_menu(a, pos))
         label.context_menu_requested.connect(lambda pos, a=ann: self._show_object_context_menu(a, pos))
@@ -592,8 +601,8 @@ class MainWindow(QMainWindow):
         marker = self.marker_items.get(ann.id)
         label = self.label_items.get(ann.id)
         if marker is not None:
-            marker.prepareGeometryChange()
             marker.setVisible(ann.enabled)
+            marker._sync_pos_from_model()
             marker.update()
         if label is not None:
             label.setVisible(ann.enabled)
@@ -609,7 +618,7 @@ class MainWindow(QMainWindow):
             label = self.label_items.get(ann.id)
             if marker is not None:
                 marker.global_style = style
-                marker.prepareGeometryChange()
+                marker._sync_pos_from_model()
                 marker.setVisible(ann.enabled)
             if label is not None:
                 label.global_style = style
@@ -683,6 +692,43 @@ class MainWindow(QMainWindow):
         old_pos = (ann.label_x, ann.label_y)
         old_manual = ann.manually_positioned
         cmd = MoveLabelCommand(ann, old_pos, (new_x, new_y), old_manual, lambda a=ann: self._refresh_annotation(a))
+        self.undo_stack.push(cmd)
+
+    def _refresh_marker_position(self, ann: Annotation) -> None:
+        """Refresh callback for MoveMarkerCommand. On top of the usual item/connector
+        refresh, this re-syncs the Reset Position button -- which matters not just
+        right after pushing the command but on every later undo()/redo() too, since
+        those are invoked directly by the undo stack (Ctrl+Z etc.) and never go
+        through _on_marker_moved/_reset_selected_marker_position at all. Deliberately
+        does NOT call style_panel.set_selected_annotation(ann) wholesale to get this:
+        that also repopulates custom_name_edit, and doing that on every undo/redo
+        would reset the text cursor mid-edit (AnnotationFieldsCommand's refresh is
+        exactly that same _refresh_annotation, fired on every keystroke)."""
+        self._refresh_annotation(ann)
+        if ann.id == self.selected_id:
+            self.style_panel.reset_position_btn.setVisible(ann.marker_x is not None)
+
+    def _on_marker_moved(self, ann: Annotation, new_x: float, new_y: float) -> None:
+        # A plain click (press+release with no real drag) still fires this -- Qt's
+        # ItemIsMovable only actually changes pos() if the mouse moved, but when it
+        # doesn't, new_x/new_y still equal the marker's current *resolved* position
+        # (image_x/image_y for a not-yet-overridden marker). Pushing that unchanged
+        # value as a real override would silently "freeze" the marker (and pop up
+        # Reset Position) just from selecting it -- skip the no-op instead.
+        if (new_x, new_y) == ann.effective_marker_position():
+            return
+        old_pos = (ann.marker_x, ann.marker_y)
+        cmd = MoveMarkerCommand(ann, old_pos, (new_x, new_y), lambda a=ann: self._refresh_marker_position(a))
+        self.undo_stack.push(cmd)
+
+    def _reset_selected_marker_position(self) -> None:
+        if self.selected_id is None:
+            return
+        ann = self._find_annotation(self.selected_id)
+        if ann is None or ann.marker_x is None:
+            return
+        old_pos = (ann.marker_x, ann.marker_y)
+        cmd = MoveMarkerCommand(ann, old_pos, (None, None), lambda a=ann: self._refresh_marker_position(a))
         self.undo_stack.push(cmd)
 
     def _on_table_visibility_changed(self, annotation_id: str, enabled: bool) -> None:

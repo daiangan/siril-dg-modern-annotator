@@ -100,7 +100,8 @@ def compute_marker_geometry(
         radius = max(radius, angular_radius_arcsec / arcsec_per_px)
         if max_radius_px is not None:
             radius = min(radius, max_radius_px)
-    return MarkerGeometry(x=ann.image_x, y=ann.image_y, radius=radius, style=style)
+    x, y = ann.effective_marker_position()
+    return MarkerGeometry(x=x, y=y, radius=radius, style=style)
 
 
 _FALLBACK_LABEL_BACKGROUND_COLOR = "#101015"

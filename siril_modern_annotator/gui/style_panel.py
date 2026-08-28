@@ -307,6 +307,7 @@ class StylePanel(QWidget):
     object_style_changed = pyqtSignal(str)  # annotation id
     object_meta_changed = pyqtSignal(str)  # annotation id
     reset_style_requested = pyqtSignal()
+    reset_marker_position_requested = pyqtSignal()
     catalog_color_changed = pyqtSignal(str, str)  # catalog key, new hex color
 
     def __init__(self, parent=None):
@@ -364,6 +365,12 @@ class StylePanel(QWidget):
         priority_row.addWidget(self.priority_label)
         priority_row.addWidget(self.priority_spin)
         object_tab_layout.addLayout(priority_row)
+        # Only shown once the marker has actually been dragged off its WCS-derived
+        # position (Annotation.marker_x/marker_y set) -- see set_selected_annotation.
+        # Hidden rather than merely disabled: brief asked for the button to "appear"
+        # when there's a custom position, not to sit there greyed out otherwise.
+        self.reset_position_btn = QPushButton("Reset Position")
+        object_tab_layout.addWidget(self.reset_position_btn)
         object_tab_layout.addWidget(self.locked_check)
         object_tab_layout.addWidget(self.use_global_check)
         object_tab_layout.addWidget(self.object_editor)
@@ -406,6 +413,7 @@ class StylePanel(QWidget):
         self.priority_spin.valueChanged.connect(self._on_object_meta_edited)
         self.locked_check.toggled.connect(self._on_object_meta_edited)
         self.use_global_check.toggled.connect(self._on_use_global_toggled)
+        self.reset_position_btn.clicked.connect(self.reset_marker_position_requested)
 
         self.set_selected_annotation(None)
 
@@ -465,7 +473,9 @@ class StylePanel(QWidget):
         self.priority_spin.setVisible(has_selection)
         self.priority_label.setVisible(has_selection)
         if not has_selection:
+            self.reset_position_btn.setVisible(False)
             return
+        self.reset_position_btn.setVisible(annotation.marker_x is not None)
         # Pre-fill with the object's actual current name as real, editable text (not
         # placeholder text) -- per user request, so starting to type adds to/edits the
         # existing name in place instead of the field looking pre-filled but actually

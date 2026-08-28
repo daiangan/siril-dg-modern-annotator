@@ -95,7 +95,13 @@ class Annotation:
     Coordinate contract (see ARCHITECTURE.md #4):
       - ra/dec are the permanent source of truth (sky space).
       - image_x/image_y are the object's position in *native* image pixel space,
-        derived once from ra/dec via the image's WCS and never moved by the user.
+        derived once from ra/dec via the image's WCS and never overwritten -- always
+        the value "Reset Position" restores.
+      - marker_x/marker_y are also native image pixel space, and represent a manual
+        override of where the *marker* is drawn; None means "use image_x/image_y" (see
+        effective_marker_position). Distinct from label_x/label_y below the same way
+        marker_style/label_style are distinct -- moving the marker off the object's
+        true position and moving its label off to the side are independent edits.
       - label_x/label_y are also native image pixel space, but represent where the
         *label* is drawn; None means "not yet placed / auto-placement owns it".
       - Preview-space coordinates are never stored here; gui/image_view.py derives
@@ -114,6 +120,8 @@ class Annotation:
     magnitude: float | None = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     enabled: bool = True
+    marker_x: float | None = None
+    marker_y: float | None = None
     label_x: float | None = None
     label_y: float | None = None
     manually_positioned: bool = False
@@ -147,6 +155,11 @@ class Annotation:
 
     def effective_marker_style(self, global_style: StylePreset) -> MarkerStyle:
         return self.marker_style or global_style.marker_style
+
+    def effective_marker_position(self) -> tuple[float, float]:
+        x = self.marker_x if self.marker_x is not None else self.image_x
+        y = self.marker_y if self.marker_y is not None else self.image_y
+        return x, y
 
     def effective_label_style(self, global_style: StylePreset) -> LabelStyle:
         return self.label_style or global_style.label_style

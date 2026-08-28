@@ -41,6 +41,34 @@ class MoveLabelCommand(QUndoCommand):
         self.refresh()
 
 
+class MoveMarkerCommand(QUndoCommand):
+    """Unlike MoveLabelCommand, no manual/auto flag is needed: nothing but the user's
+    own drag (or a "Reset Position" click, which passes new_pos=(None, None)) ever
+    changes marker_x/marker_y, so the value itself already says whether the marker is
+    overridden -- see Annotation.effective_marker_position."""
+
+    def __init__(
+        self,
+        annotation: Annotation,
+        old_pos: tuple[float | None, float | None],
+        new_pos: tuple[float | None, float | None],
+        refresh: Callable[[], None],
+    ):
+        super().__init__(f"Move marker: {annotation.catalog_name}")
+        self.annotation = annotation
+        self.old_pos = old_pos
+        self.new_pos = new_pos
+        self.refresh = refresh
+
+    def redo(self) -> None:
+        self.annotation.marker_x, self.annotation.marker_y = self.new_pos
+        self.refresh()
+
+    def undo(self) -> None:
+        self.annotation.marker_x, self.annotation.marker_y = self.old_pos
+        self.refresh()
+
+
 class ToggleVisibilityCommand(QUndoCommand):
     def __init__(self, annotation: Annotation, enabled: bool, refresh: Callable[[], None]):
         super().__init__(f"{'Show' if enabled else 'Hide'}: {annotation.catalog_name}")
