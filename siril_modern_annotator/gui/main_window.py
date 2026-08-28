@@ -913,6 +913,16 @@ class MainWindow(QMainWindow):
         if not self.annotations:
             return
         before = {a.id: (a.label_x, a.label_y, a.manually_positioned) for a in self.annotations}
+        # Clear manually_positioned first -- otherwise keep_manual=True below treats
+        # every label the user has ever dragged as a fixed obstacle and refuses to
+        # touch it, which is the opposite of what clicking a button literally named
+        # "Auto Arrange Labels" is for. Confirmed by a real report: a layout made
+        # entirely of manually-dragged, now-overlapping labels was completely
+        # unaffected by this button. Locked objects are untouched by this (a separate
+        # flag) and stay correctly excluded either way. Mirrors _reset_layout's own
+        # (now effectively redundant, but harmless) flag-clearing loop.
+        for ann in self.annotations:
+            ann.manually_positioned = False
         auto_arrange(
             self.annotations, self.global_style_holder[0],
             self.image_info.width, self.image_info.height,
