@@ -100,4 +100,4 @@ If this tool has been useful to you, consider [buying me a coffee](https://www.p
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE).
