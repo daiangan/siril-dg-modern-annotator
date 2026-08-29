@@ -20,6 +20,8 @@ from ..annotation.models import (
     ConnectorStyle,
     DecLabelPosition,
     GridStyle,
+    InfoBoxCorner,
+    InfoBoxStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
@@ -135,10 +137,20 @@ def grid_style_from_dict(d: dict) -> GridStyle:
     return GridStyle(**d)
 
 
+def info_box_style_from_dict(d: dict) -> InfoBoxStyle:
+    d = dict(d)
+    d["corner"] = InfoBoxCorner(d["corner"])
+    return InfoBoxStyle(**d)
+
+
 def overlay_settings_from_dict(d: dict) -> OverlaySettings:
     return OverlaySettings(
         grid=grid_style_from_dict(d["grid"]),
         compass=CompassStyle(**d["compass"]),
+        # A project file saved before the info box existed simply has no key for it --
+        # falls back to InfoBoxStyle's own defaults (disabled), same reasoning as
+        # ProjectData's overlay_settings default_factory below for pre-overlay files.
+        info_box=info_box_style_from_dict(d["info_box"]) if "info_box" in d else InfoBoxStyle(),
     )
 
 

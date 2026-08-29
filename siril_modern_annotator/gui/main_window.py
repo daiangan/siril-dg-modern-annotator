@@ -45,6 +45,7 @@ from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
     compute_compass_geometry,
     compute_connector_points,
+    compute_info_box_geometry,
     compute_label_geometry,
     compute_marker_geometry,
     default_max_marker_radius_px,
@@ -55,12 +56,13 @@ from ..persistence import presets as preset_store
 from ..persistence.project import CatalogConfig, ExportSettings, ProjectData, load, project_path_for_image, save
 from ..siril_bridge.interface import ImageInfo, NoImageLoadedError, SirilBridge, SirilBridgeError
 from .annotation_item import ConnectorItem, LabelItem, MarkerItem, qt_text_measurer
-from .overlay_item import CompassItem, GridItem
+from .overlay_item import CompassItem, GridItem, InfoBoxItem
 from .commands import (
     AnnotationFieldsCommand,
     AutoArrangeCommand,
     GlobalStyleChangeCommand,
     MoveCompassCommand,
+    MoveInfoBoxCommand,
     MoveLabelCommand,
     MoveMarkerCommand,
     ToggleVisibilityCommand,
@@ -142,13 +144,14 @@ class MainWindow(QMainWindow):
         self.connector_items: dict[str, ConnectorItem] = {}
         self.selected_id: str | None = None
 
-        # Grid/compass: off by default every session (per user request) -- unlike
-        # global_style/catalog_colors above, deliberately not restored from
+        # Grid/compass/info box: off by default every session (per user request) --
+        # unlike global_style/catalog_colors above, deliberately not restored from
         # last_used_store; re-enabling them is a quick toolbar toggle either way. Only
         # ever persisted per-image, in a saved project file (see persistence/project.py).
         self.overlay_settings = OverlaySettings()
         self.grid_item: GridItem | None = None
         self.compass_item: CompassItem | None = None
+        self.info_box_item: InfoBoxItem | None = None
 
         self._pending_object_cmd: AnnotationFieldsCommand | None = None
         self._pending_object_target: str | None = None
@@ -188,6 +191,7 @@ class MainWindow(QMainWindow):
         self.style_panel.catalog_color_changed.connect(self._on_catalog_color_changed)
         self.style_panel.overlay_settings_changed.connect(self._on_overlay_style_edited)
         self.style_panel.reset_compass_position_requested.connect(self._reset_compass_position)
+        self.style_panel.reset_info_box_position_requested.connect(self._reset_info_box_position)
         self.style_panel.set_overlay_settings(self.overlay_settings)
 
         self.tools_panel = ToolsPanel()
@@ -290,8 +294,12 @@ class MainWindow(QMainWindow):
         self.compass_action = QAction("Compass", self, checkable=True)
         self.compass_action.setChecked(self.overlay_settings.compass.enabled)
         self.compass_action.toggled.connect(self._on_compass_toggled)
+        self.info_box_action = QAction("Info Box", self, checkable=True)
+        self.info_box_action.setChecked(self.overlay_settings.info_box.enabled)
+        self.info_box_action.toggled.connect(self._on_info_box_toggled)
         self.overlays_menu.addAction(self.grid_action)
         self.overlays_menu.addAction(self.compass_action)
+        self.overlays_menu.addAction(self.info_box_action)
         overlays_btn.setMenu(self.overlays_menu)
         toolbar.addWidget(overlays_btn)
         toolbar.addSeparator()
@@ -385,6 +393,7 @@ class MainWindow(QMainWindow):
             self.overlay_settings = preset_store.default_overlay_settings_for_image(
                 self.image_info.width, self.image_info.height
             )
+            self.overlay_settings.info_box.text = self._default_info_box_text()
             self._setup_overlay_items()
             self.style_panel.set_overlay_settings(self.overlay_settings)
             # Prefer the actual loaded filename over the FITS OBJECT keyword -- per
@@ -585,21 +594,42 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------------- overlays ----
 
+    def _default_info_box_text(self) -> str:
+        """Pre-populates the Info Box overlay from FITS header metadata (camera,
+        telescope, filter, exposure, etc. -- whatever get_technical_metadata() finds;
+        see its own docstring for which fields are confirmed vs. best-effort), the
+        same "real text, not a placeholder" convention as an object's custom display
+        name -- the user edits this in place rather than starting from nothing."""
+        try:
+            metadata = self.bridge.get_technical_metadata()
+        except Exception:
+            # Purely cosmetic pre-fill -- must never block image loading over it.
+            logger.debug("Could not read technical metadata for the Info Box overlay.", exc_info=True)
+            return ""
+        return "\n".join(f"{label}: {value}" for label, value in metadata.items())
+
     def _setup_overlay_items(self) -> None:
         """Creates (or, on reloading a different image, re-creates against the new
-        wcs) the grid/compass scene items. Independent of _rebuild_scene -- those are
-        one-per-Annotation, these are one-per-image."""
+        wcs/image size) the grid/compass/info box scene items. Independent of
+        _rebuild_scene -- those are one-per-Annotation, these are one-per-image."""
         if self.wcs is None:
             return
-        for item in (self.grid_item, self.compass_item):
+        for item in (self.grid_item, self.compass_item, self.info_box_item):
             if item is not None and item.scene() is not None:
                 item.scene().removeItem(item)
         self.grid_item = GridItem(self.wcs, self.overlay_settings.grid)
         self.compass_item = CompassItem(self.wcs, self.overlay_settings.compass)
         self.compass_item.moved.connect(self._on_compass_moved)
         self.compass_item.context_menu_requested.connect(self._show_compass_context_menu)
+        self.info_box_item = InfoBoxItem(
+            self.overlay_settings.info_box, self.image_info.width, self.image_info.height,
+            text_measurer=qt_text_measurer(None),
+        )
+        self.info_box_item.moved.connect(self._on_info_box_moved)
+        self.info_box_item.context_menu_requested.connect(self._show_info_box_context_menu)
         self.image_view.scene_.addItem(self.grid_item)
         self.image_view.scene_.addItem(self.compass_item)
+        self.image_view.scene_.addItem(self.info_box_item)
 
     def _refresh_overlays(self) -> None:
         if self.grid_item is not None:
@@ -608,6 +638,9 @@ class MainWindow(QMainWindow):
         if self.compass_item is not None:
             self.compass_item._sync_pos_from_model()
             self.compass_item.update()
+        if self.info_box_item is not None:
+            self.info_box_item._sync_pos_from_model()
+            self.info_box_item.update()
         self.style_panel.set_overlay_settings(self.overlay_settings)
 
     def _on_grid_toggled(self, checked: bool) -> None:
@@ -618,13 +651,19 @@ class MainWindow(QMainWindow):
         self.overlay_settings.compass.enabled = checked
         self._refresh_overlays()
 
+    def _on_info_box_toggled(self, checked: bool) -> None:
+        self.overlay_settings.info_box.enabled = checked
+        self._refresh_overlays()
+
     def _on_overlay_style_edited(self) -> None:
         # No undo tracking, same as catalog color edits (_on_catalog_color_changed) --
-        # a style tweak, not a spatial edit like the compass drag/reset below.
+        # a style tweak, not a spatial edit like the compass/info box drag/reset below.
         for key, value in self.style_panel.pending_grid_style_values().items():
             setattr(self.overlay_settings.grid, key, value)
         for key, value in self.style_panel.pending_compass_style_values().items():
             setattr(self.overlay_settings.compass, key, value)
+        for key, value in self.style_panel.pending_info_box_style_values().items():
+            setattr(self.overlay_settings.info_box, key, value)
         self._refresh_overlays()
 
     def _on_compass_moved(self, new_x: float, new_y: float) -> None:
@@ -654,6 +693,33 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         reset_action = menu.addAction("Reset Position")
         reset_action.triggered.connect(self._reset_compass_position)
+        menu.exec(screen_pos)
+
+    def _on_info_box_moved(self, new_x: float, new_y: float) -> None:
+        style = self.overlay_settings.info_box
+        current = compute_info_box_geometry(
+            style.text, style, self.image_info.width, self.image_info.height,
+        )
+        if current is not None and (new_x, new_y) == (current.bbox.x0, current.bbox.y0):
+            return
+        old_anchor = (style.anchor_x, style.anchor_y)
+        cmd = MoveInfoBoxCommand(style, old_anchor, (new_x, new_y), self._refresh_overlays)
+        self.undo_stack.push(cmd)
+
+    def _reset_info_box_position(self) -> None:
+        style = self.overlay_settings.info_box
+        if style.anchor_x is None:
+            return
+        old_anchor = (style.anchor_x, style.anchor_y)
+        cmd = MoveInfoBoxCommand(style, old_anchor, (None, None), self._refresh_overlays)
+        self.undo_stack.push(cmd)
+
+    def _show_info_box_context_menu(self, screen_pos) -> None:
+        if self.overlay_settings.info_box.anchor_x is None:
+            return
+        menu = QMenu(self)
+        reset_action = menu.addAction("Reset Position")
+        reset_action.triggered.connect(self._reset_info_box_position)
         menu.exec(screen_pos)
 
     # --------------------------------------------------------------- scene sync ----
@@ -1101,6 +1167,9 @@ class MainWindow(QMainWindow):
         self.compass_action.blockSignals(True)
         self.compass_action.setChecked(self.overlay_settings.compass.enabled)
         self.compass_action.blockSignals(False)
+        self.info_box_action.blockSignals(True)
+        self.info_box_action.setChecked(self.overlay_settings.info_box.enabled)
+        self.info_box_action.blockSignals(False)
         if self.wcs is not None:
             self._setup_overlay_items()
         self.undo_stack.clear()
