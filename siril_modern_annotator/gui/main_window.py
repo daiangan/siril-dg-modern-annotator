@@ -9,6 +9,7 @@ point), and it only ever does so on the main thread.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +41,7 @@ from ..annotation.catalogs import (
     VizierProvider,
 )
 from ..annotation.layout import auto_arrange
-from ..annotation.models import Annotation, OverlaySettings, StylePreset
+from ..annotation.models import Annotation, MarkerShape, MarkerStyle, OverlaySettings, StylePreset
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
     compute_compass_geometry,
@@ -1019,7 +1020,48 @@ class MainWindow(QMainWindow):
         ann = self._find_annotation(annotation_id)
         if ann is None:
             return
+        old_shape = ann.marker_style.shape if ann.marker_style is not None else None
         new_values = self.style_panel.pending_object_style_values()
+        new_marker_style = new_values.get("marker_style")
+        if (
+            new_marker_style is not None
+            and new_marker_style.shape is MarkerShape.ELLIPSE
+            and old_shape is not MarkerShape.ELLIPSE
+        ):
+            # Switching a per-object marker to Ellipse for the first time: the flat
+            # dataclass default (20x12px) is often much smaller than the object's
+            # actual rendered circle -- especially with "Scale with angular size" on,
+            # e.g. a large galaxy rendering at several hundred px -- confirmed real
+            # report that the ellipse "looked very small" right after switching. Size
+            # it to at least the circle's current on-screen radius instead, so
+            # switching shape doesn't visually shrink the marker. Only applies when
+            # radius_x/y are still untouched (the fresh MarkerStyle defaults) -- a
+            # deliberately re-tuned ellipse must survive flipping back to Circle and
+            # forward again, not get silently reset every time.
+            fresh_defaults = MarkerStyle()
+            # Approximate, not exact equality: the Radius X/Y sliders' quadratic curve
+            # (LabeledSlider) quantizes to a fixed internal step count, so a value that
+            # was never touched round-trips close to the dataclass default but not
+            # bit-exact (e.g. 19.9928 instead of 20.0).
+            _RADIUS_DEFAULT_TOLERANCE = 1.0
+            if (
+                abs(new_marker_style.radius_x - fresh_defaults.radius_x) < _RADIUS_DEFAULT_TOLERANCE
+                and abs(new_marker_style.radius_y - fresh_defaults.radius_y) < _RADIUS_DEFAULT_TOLERANCE
+            ):
+                current_geo = compute_marker_geometry(
+                    ann, self.global_style_holder[0], self.arcsec_per_px,
+                    self.max_marker_radius_px, self.catalog_colors,
+                )
+                target_radius = max(current_geo.radius, fresh_defaults.radius_x)
+                new_marker_style = replace(new_marker_style, radius_x=target_radius, radius_y=target_radius)
+                new_values["marker_style"] = new_marker_style
+                editor = self.style_panel.object_editor
+                editor.marker_radius_x.blockSignals(True)
+                editor.marker_radius_y.blockSignals(True)
+                editor.marker_radius_x.setValue(target_radius)
+                editor.marker_radius_y.setValue(target_radius)
+                editor.marker_radius_x.blockSignals(False)
+                editor.marker_radius_y.blockSignals(False)
         self._push_or_merge_object_command(ann, new_values, f"Change style: {ann.catalog_name}")
 
     def _on_object_meta_edited(self, annotation_id: str) -> None:
