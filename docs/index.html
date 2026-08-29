@@ -480,26 +480,16 @@
   .shot {
     aspect-ratio: 16/10.5;
     border-radius: 10px;
-    border: 1px dashed var(--border);
+    border: 1px solid var(--border);
     background: var(--bg-elevated);
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
     color: var(--text-faint);
     position: relative;
     overflow: hidden;
   }
-  .shot svg { opacity: 0.5; }
-  .shot-label {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.02em;
-    color: var(--text-faint);
-    text-align: center;
-    padding: 0 12px;
-  }
+  .shot img { width: 100%; height: 100%; object-fit: contain; }
 
   @media (max-width: 900px) {
     .steps { grid-template-columns: repeat(2, 1fr); row-gap: 44px; }
@@ -822,8 +812,7 @@
       <div class="step">
         <div class="step-num">01</div>
         <div class="shot">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="14" rx="1.5"></rect><circle cx="8.5" cy="9.5" r="1.5"></circle><path d="M3 15l4.5-4 4 3.5L17 9l4 4"></path></svg>
-          <div class="shot-label">screenshot &mdash; main canvas after load</div>
+          <img src="images/howitworks-load.jpg" alt="DG Modern Annotator main canvas right after loading a plate-solved image, with the Objects panel and detected catalog objects already laid out.">
         </div>
         <h3>Load &amp; detect</h3>
         <p>Open a plate-solved image in Siril and run the script. Objects in frame appear automatically, already laid out.</p>
@@ -831,8 +820,7 @@
       <div class="step">
         <div class="step-num">02</div>
         <div class="shot">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"></circle><path d="M12 4v3M12 17v3M4 12h3M17 12h3"></path></svg>
-          <div class="shot-label">screenshot &mdash; dragging a label</div>
+          <img src="images/howitworks-arrange.jpg" alt="Andromeda galaxy (M31) annotated with draggable labels and connector lines for M31, M32, M110, and NGC206.">
         </div>
         <h3>Arrange</h3>
         <p>Drag markers and labels by hand, or let Auto Arrange do it. Switch a marker to an ellipse for anything that isn&rsquo;t round.</p>
@@ -840,8 +828,7 @@
       <div class="step">
         <div class="step-num">03</div>
         <div class="shot">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>
-          <div class="shot-label">screenshot &mdash; style panel + overlays</div>
+          <img src="images/howitworks-context.jpg" alt="A Cygnus-region frame with the technical info box overlay showing camera, telescope, and exposure details pulled from the FITS header.">
         </div>
         <h3>Add context</h3>
         <p>Turn on the coordinate grid, compass, or technical info box if you want them. Pick colors and fonts once, globally or per object.</p>
@@ -849,8 +836,7 @@
       <div class="step">
         <div class="step-num">04</div>
         <div class="shot">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3v12m0 0l-4-4m4 4l4-4"></path><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"></path></svg>
-          <div class="shot-label">screenshot &mdash; export dialog</div>
+          <img src="images/howitworks-export.png" alt="The Export Annotated Image dialog, with format, resolution scale, JPEG quality, and DPI options.">
         </div>
         <h3>Export</h3>
         <p>One click, full resolution, independent of whatever preview size you were looking at &mdash; ready to post or print.</p>
@@ -864,34 +850,30 @@
     <div class="section-head">
       <div class="eyebrow">Screenshots</div>
       <h2>What it looks like inside Siril.</h2>
-      <p>Real screenshots go here &mdash; the frames below are placeholders sized to drop them in directly.</p>
+      <p>Real, unedited exports from the app &mdash; nothing here has been touched up.</p>
     </div>
     <div class="gallery-grid">
       <div class="gallery-item">
         <div class="shot">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="14" rx="1.5"></rect><circle cx="8.5" cy="9.5" r="1.5"></circle><path d="M3 15l4.5-4 4 3.5L17 9l4 4"></path></svg>
-          <div class="shot-label">main-canvas.png</div>
+          <img src="images/howitworks-load.jpg" alt="DG Modern Annotator main canvas right after loading a plate-solved image, with the Objects panel and detected catalog objects already laid out.">
         </div>
         <div class="gallery-caption"><span class="dot-inline" style="background:var(--mark-teal)"></span>The interactive canvas, mid-edit</div>
       </div>
       <div class="gallery-item">
         <div class="shot">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
-          <div class="shot-label">object-panel.png</div>
+          <img src="images/gallery-objects.png" alt="The Objects panel, listing detected catalog objects with visibility checkboxes, catalog, type, and magnitude columns, plus search and catalog filter fields.">
         </div>
         <div class="gallery-caption"><span class="dot-inline" style="background:var(--accent)"></span>The Objects panel &mdash; search, filter, toggle</div>
       </div>
       <div class="gallery-item">
         <div class="shot">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 15 0 010 18a9 15 0 010-18"></path></svg>
-          <div class="shot-label">style-panel.png</div>
+          <img src="images/gallery-style.png" alt="The Style panel's Catalog Colors tab, showing a distinct color swatch for each of the Messier, NGC, IC, LDN, Sharpless, and star catalogs.">
         </div>
         <div class="gallery-caption"><span class="dot-inline" style="background:var(--mark-lavender)"></span>Per-catalog colors &amp; typography</div>
       </div>
       <div class="gallery-item">
         <div class="shot">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l7 15 2-6 6-2-15-7z"></path></svg>
-          <div class="shot-label">exported-result.jpg</div>
+          <img src="images/gallery-export.jpg" alt="A finished full-resolution export of a wide Cygnus-region field, with dozens of stars, nebulae, and dark nebulae labeled and color-coded by catalog.">
         </div>
         <div class="gallery-caption"><span class="dot-inline" style="background:var(--mark-coral)"></span>A finished, full-resolution export</div>
       </div>
