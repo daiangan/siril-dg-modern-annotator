@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="DG Modern Annotator turns a plate-solved Siril image into a fully labeled, presentation-ready image, with draggable markers and labels, full styling control, and full-resolution export.">
+
 <title>DG Modern Annotator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -284,65 +285,80 @@
     border-radius: 16px;
     overflow: visible;
   }
-  .annotated-photo {
+  .slider {
     position: relative;
     border-radius: 14px;
     overflow: hidden;
     border: 1px solid var(--border);
     box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.02);
-    aspect-ratio: 16 / 9.2;
-    background:
-      radial-gradient(circle at 47% 52%, rgba(255, 226, 178, 0.9) 0%, rgba(255, 200, 150, 0.5) 6%, rgba(190, 130, 130, 0.28) 14%, transparent 30%),
-      radial-gradient(ellipse 60% 40% at 47% 52%, rgba(150, 110, 140, 0.35), transparent 70%),
-      radial-gradient(circle at 20% 25%, rgba(140,170,220,0.10), transparent 40%),
-      #05060a;
+    aspect-ratio: 3 / 2;
+    background: #05060a;
   }
-  .annotated-photo canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .annotated-photo .placeholder-tag {
+  .slider-track {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.6s cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  .slide { position: relative; flex: 0 0 100%; height: 100%; }
+  .slide img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .slide-caption {
     position: absolute;
     bottom: 14px;
     left: 16px;
     font-family: var(--font-mono);
     font-size: 11px;
-    color: rgba(255,255,255,0.45);
-    letter-spacing: 0.04em;
-    background: rgba(0,0,0,0.35);
-    padding: 4px 9px;
+    color: rgba(255,255,255,0.75);
+    letter-spacing: 0.02em;
+    background: rgba(0,0,0,0.45);
+    padding: 5px 10px;
     border-radius: 5px;
     backdrop-filter: blur(3px);
   }
-
-  .marker-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
-  .marker-svg path { fill: none; stroke-width: 1.4; opacity: 0.85; }
-  .marker-svg circle.dot { opacity: 0.95; }
-
-  .callout {
+  .slider-arrow {
     position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(10, 11, 17, 0.55);
+    color: var(--text);
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 13px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-    background: rgba(15, 16, 24, 0.86);
+    justify-content: center;
+    cursor: pointer;
     backdrop-filter: blur(6px);
-    border: 1px solid rgba(255,255,255,0.08);
+    transition: background 0.15s ease, border-color 0.15s ease;
     z-index: 3;
-    box-shadow: 0 8px 22px -8px rgba(0,0,0,0.5);
   }
-  .callout .dot-inline { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-
-  .c-teal    { top: 9%;  left: 4%; color: var(--mark-teal); }
-  .c-amber   { top: 47%; right: 3%; color: var(--accent); }
-  .c-lavender{ bottom: 11%; left: 6%; color: var(--mark-lavender); }
-  .c-coral   { top: 16%; right: 6%; color: var(--mark-coral); }
+  .slider-arrow:hover { background: rgba(10, 11, 17, 0.85); border-color: rgba(255,255,255,0.3); }
+  .slider-arrow.prev { left: 14px; }
+  .slider-arrow.next { right: 14px; }
+  .slider-arrow svg { width: 18px; height: 18px; }
+  .slider-dots {
+    position: absolute;
+    bottom: 14px;
+    right: 16px;
+    display: flex;
+    gap: 7px;
+    z-index: 3;
+  }
+  .slider-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    border: none;
+    padding: 0;
+    background: rgba(255,255,255,0.35);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .slider-dot.is-active { background: var(--accent); transform: scale(1.25); }
 
   @media (max-width: 780px) {
-    .callout { position: static; margin: 8px 6px; display: inline-flex; }
-    .marker-svg { display: none; }
-    .annotated-photo { aspect-ratio: 4/3; }
+    .slider-arrow { width: 32px; height: 32px; }
   }
 
   /* ---------------------------------------------------------------- sections generic */
@@ -667,23 +683,27 @@
     </div>
 
     <div class="annotated-frame">
-      <div class="annotated-photo">
-        <canvas id="nebulaCanvas"></canvas>
-        <svg class="marker-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path d="M 8 12 L 30 22 L 46 40" vector-effect="non-scaling-stroke" stroke="#7fc8c4"></path>
-          <circle class="dot" cx="46" cy="40" r="1.3" fill="#7fc8c4"></circle>
-          <path d="M 94 50 L 74 52 L 58 50" vector-effect="non-scaling-stroke" stroke="#f2c572"></path>
-          <circle class="dot" cx="58" cy="50" r="1.3" fill="#f2c572"></circle>
-          <path d="M 10 86 L 32 74 L 42 58" vector-effect="non-scaling-stroke" stroke="#b79ced"></path>
-          <circle class="dot" cx="42" cy="58" r="1.3" fill="#b79ced"></circle>
-          <path d="M 92 18 L 70 26 L 60 38" vector-effect="non-scaling-stroke" stroke="#f2938c"></path>
-          <circle class="dot" cx="60" cy="38" r="1.3" fill="#f2938c"></circle>
-        </svg>
-        <div class="callout c-teal"><span class="dot-inline" style="background:currentColor"></span>Drag any label</div>
-        <div class="callout c-amber"><span class="dot-inline" style="background:currentColor"></span>Auto-arranged</div>
-        <div class="callout c-lavender"><span class="dot-inline" style="background:currentColor"></span>Per-catalog color</div>
-        <div class="callout c-coral"><span class="dot-inline" style="background:currentColor"></span>Ellipse for galaxies</div>
-        <div class="placeholder-tag">placeholder &mdash; swap for a real annotated export</div>
+      <div class="slider" id="heroSlider">
+        <div class="slider-track" id="heroSliderTrack">
+          <figure class="slide">
+            <img src="images/hero-ngc7000.jpg" alt="DG Modern Annotator export of NGC 7000, the North America and Pelican Nebulae, with catalog objects, dark nebulae, and bright stars labeled and color-coded by catalog.">
+            <div class="slide-caption">NGC 7000 &mdash; North America &amp; Pelican Nebulae</div>
+          </figure>
+          <figure class="slide">
+            <img src="images/hero-antares.jpg" alt="DG Modern Annotator export of the Antares and Rho Ophiuchi region, with nebulae, the M4 globular cluster, and stars labeled and color-coded by catalog.">
+            <div class="slide-caption">Antares &amp; the Rho Ophiuchi cloud complex</div>
+          </figure>
+        </div>
+        <button class="slider-arrow prev" id="heroSliderPrev" aria-label="Previous image" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <button class="slider-arrow next" id="heroSliderNext" aria-label="Next image" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <div class="slider-dots" id="heroSliderDots">
+          <button class="slider-dot" aria-label="Show slide 1" type="button"></button>
+          <button class="slider-dot" aria-label="Show slide 2" type="button"></button>
+        </div>
       </div>
     </div>
   </div>
@@ -1018,28 +1038,39 @@
       draw();
     }
 
-    // Hero mockup nebula -- static-ish soft field, drawn once.
-    var nc = document.getElementById('nebulaCanvas');
-    if (nc) {
-      var nctx = nc.getContext('2d');
-      function sizeNebula() {
-        var rect = nc.parentElement.getBoundingClientRect();
-        nc.width = rect.width * devicePixelRatio;
-        nc.height = rect.height * devicePixelRatio;
+    // Hero sample slider -- two real annotated exports, arrows + dots + autoplay.
+    var track = document.getElementById('heroSliderTrack');
+    if (track) {
+      var slides = track.querySelectorAll('.slide');
+      var dots = document.querySelectorAll('#heroSliderDots .slider-dot');
+      var current = 0;
+      var autoplayTimer = null;
+
+      function goTo(index) {
+        current = (index + slides.length) % slides.length;
+        track.style.transform = 'translateX(-' + (current * 100) + '%)';
+        dots.forEach(function (dot, i) { dot.classList.toggle('is-active', i === current); });
       }
-      sizeNebula();
-      var rng = (function seeded(seed) {
-        return function () { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
-      })(42);
-      for (var i = 0; i < 140; i++) {
-        var x = rng() * nc.width, y = rng() * nc.height;
-        var r = rng() * 1.4 * devicePixelRatio + 0.3;
-        nctx.beginPath();
-        nctx.arc(x, y, r, 0, Math.PI * 2);
-        nctx.fillStyle = 'rgba(255,255,255,' + (0.25 + rng() * 0.55).toFixed(2) + ')';
-        nctx.fill();
+      function startAutoplay() {
+        if (reduceMotion) return;
+        stopAutoplay();
+        autoplayTimer = window.setInterval(function () { goTo(current + 1); }, 6000);
       }
-      window.addEventListener('resize', sizeNebula);
+      function stopAutoplay() {
+        if (autoplayTimer) { window.clearInterval(autoplayTimer); autoplayTimer = null; }
+      }
+
+      document.getElementById('heroSliderPrev').addEventListener('click', function () { goTo(current - 1); startAutoplay(); });
+      document.getElementById('heroSliderNext').addEventListener('click', function () { goTo(current + 1); startAutoplay(); });
+      dots.forEach(function (dot, i) {
+        dot.addEventListener('click', function () { goTo(i); startAutoplay(); });
+      });
+      var heroSlider = document.getElementById('heroSlider');
+      heroSlider.addEventListener('mouseenter', stopAutoplay);
+      heroSlider.addEventListener('mouseleave', startAutoplay);
+
+      goTo(0);
+      startAutoplay();
     }
 
     // Gentle reveal-on-scroll for sections.
@@ -1063,5 +1094,6 @@
     }
   })();
 </script>
+
 </body>
 </html>
