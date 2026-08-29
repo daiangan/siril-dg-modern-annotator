@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from ..annotation.catalogs import (
     DEFAULT_CATALOG_COLORS,
     SUPPORTED_CATALOGS,
@@ -101,11 +102,17 @@ _DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS)
 
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA"
 
+# Shown in the window title (with __version__ appended) so the user always knows which
+# build they're running -- per user request. Also fixes a stale rename: every other
+# user-facing surface (the Siril log banner, the built script's filename) already says
+# "DG Modern Annotator", but this window title was missed when that rename happened.
+APP_TITLE = "DG Modern Annotator"
+
 
 class MainWindow(QMainWindow):
     def __init__(self, bridge: SirilBridge):
         super().__init__()
-        self.setWindowTitle("Siril Modern Annotator")
+        self.setWindowTitle(f"{APP_TITLE} v{__version__}")
         self.resize(1440, 900)
 
         self.bridge = bridge
@@ -427,7 +434,7 @@ class MainWindow(QMainWindow):
                 f"Connected — {self.image_info.width}×{self.image_info.height}"
                 f" — {self.arcsec_per_px:.2f}\"/px"
             )
-            self.setWindowTitle(f"Siril Modern Annotator — {self.source_identifier}")
+            self.setWindowTitle(f"{APP_TITLE} v{__version__} — {self.source_identifier}")
             self._start_catalog_fetch(self.active_catalogs)
         except (NoImageLoadedError, NotPlateSolvedError, SirilBridgeError) as exc:
             QMessageBox.critical(self, "Siril Modern Annotator", str(exc))
