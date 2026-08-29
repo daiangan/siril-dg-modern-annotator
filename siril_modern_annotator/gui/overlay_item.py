@@ -41,10 +41,18 @@ def _grid_label_draw_point(label, style: GridStyle, metrics: QFontMetricsF) -> Q
 
 class GridItem(QGraphicsItem):
     """Non-interactive: never accepts mouse input, so it can never intercept a click
-    meant for a marker/label/the compass underneath or on top of it (belt-and-braces
-    alongside the low z-value below -- see MarkerItem.shape()'s docstring for the kind
-    of "large item's mostly-empty area steals a click" bug this sidesteps outright by
-    construction rather than needing a precise hit-test)."""
+    meant for a marker/label/the compass underneath or on top of it. setAcceptedMouse
+    Buttons(NoButton) below only stops normal Qt event *delivery* -- it does nothing
+    for a raw hit-test query like QGraphicsView.itemAt(), which is exactly what
+    ImageView.mousePressEvent uses to decide whether a click landed on "empty space"
+    (deselect everything) or a real item. Confirmed real regression: since
+    boundingRect() spans the *entire image frame* and shape() defaults to that same
+    full rect (same class of bug MarkerItem.shape() already fixes for markers, just
+    egregious here since this item's honest bounding box really is the whole image),
+    every click anywhere in the frame hit this item first via itemAt(), so clicking
+    empty space silently stopped deselecting the current object at all. shape()
+    returning an always-empty path is what actually makes this item invisible to any
+    hit-test, not the NoButton flag."""
 
     def __init__(self, wcs: SirilWcs, style: GridStyle):
         super().__init__()
@@ -58,6 +66,9 @@ class GridItem(QGraphicsItem):
 
     def boundingRect(self) -> QRectF:
         return QRectF(0.0, 0.0, float(self.wcs.native_width), float(self.wcs.native_height))
+
+    def shape(self) -> QPainterPath:
+        return QPainterPath()
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
         style = self.style
