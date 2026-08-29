@@ -34,6 +34,7 @@ from ..annotation.models import (
     BackgroundMode,
     ConnectorStyle,
     DecLabelPosition,
+    InfoBoxCorner,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
@@ -373,6 +374,7 @@ class StylePanel(QWidget):
     catalog_color_changed = pyqtSignal(str, str)  # catalog key, new hex color
     overlay_settings_changed = pyqtSignal()
     reset_compass_position_requested = pyqtSignal()
+    reset_info_box_position_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -514,14 +516,57 @@ class StylePanel(QWidget):
         compass_form.addRow("Label size", self.compass_label_size)
         compass_form.addRow(self.reset_compass_btn)
 
+        # Technical-details text box (camera/telescope/filter/etc.) -- per user
+        # request: pre-populated from the FITS header (see MainWindow._default_info_
+        # box_text) as real, editable text, same "starts real, not a placeholder"
+        # convention as an object's custom display name. On/off itself lives on the
+        # toolbar's "Overlays" menu, same split as Grid/Compass above.
+        info_box_group = QGroupBox("Info Box")
+        info_box_layout = QVBoxLayout(info_box_group)
+        self.info_box_text_edit = QPlainTextEdit()
+        self.info_box_text_edit.setFixedHeight(110)
+        self.info_box_text_edit.setPlaceholderText("Camera, telescope, filter, exposure, etc.")
+        info_box_form = QFormLayout()
+        self.info_box_corner = QComboBox()
+        for corner in InfoBoxCorner:
+            self.info_box_corner.addItem(corner.value.replace("_", " ").title(), corner)
+        self.info_box_bg_color = ColorButton("#000000")
+        self.info_box_bg_opacity = DarkDoubleSpinBox()
+        self.info_box_bg_opacity.setRange(0.0, 1.0)
+        self.info_box_bg_opacity.setSingleStep(0.05)
+        self.info_box_border_radius = DarkDoubleSpinBox()
+        self.info_box_border_radius.setRange(0.0, 40.0)
+        self.info_box_padding = DarkDoubleSpinBox()
+        self.info_box_padding.setRange(0.0, 40.0)
+        self.info_box_text_color = ColorButton("#f2f2f2")
+        self.info_box_font_size = DarkDoubleSpinBox()
+        self.info_box_font_size.setRange(6.0, 200.0)
+        # Same "appear only once overridden" convention as the marker's/compass's own
+        # Reset Position button -- see set_overlay_settings.
+        self.reset_info_box_btn = QPushButton("Reset Position")
+        self.reset_info_box_btn.clicked.connect(self.reset_info_box_position_requested)
+        info_box_form.addRow("Corner", self.info_box_corner)
+        info_box_form.addRow("Background", self.info_box_bg_color)
+        info_box_form.addRow("Background opacity", self.info_box_bg_opacity)
+        info_box_form.addRow("Border radius", self.info_box_border_radius)
+        info_box_form.addRow("Padding", self.info_box_padding)
+        info_box_form.addRow("Text color", self.info_box_text_color)
+        info_box_form.addRow("Font size", self.info_box_font_size)
+        info_box_form.addRow(self.reset_info_box_btn)
+        info_box_layout.addWidget(self.info_box_text_edit)
+        info_box_layout.addLayout(info_box_form)
+
         overlays_layout.addWidget(grid_group)
         overlays_layout.addWidget(compass_group)
+        overlays_layout.addWidget(info_box_group)
         overlays_layout.addStretch(1)
 
         for w in (
             self.grid_opacity, self.grid_line_width, self.grid_show_labels, self.grid_label_size,
             self.grid_ra_position, self.grid_dec_position,
             self.compass_line_width, self.compass_arrow_size, self.compass_label_size,
+            self.info_box_corner, self.info_box_bg_opacity, self.info_box_border_radius,
+            self.info_box_padding, self.info_box_font_size,
         ):
             signal = (
                 getattr(w, "currentIndexChanged", None)
@@ -529,8 +574,9 @@ class StylePanel(QWidget):
                 or getattr(w, "toggled", None)
             )
             signal.connect(self.overlay_settings_changed)
-        for btn in (self.grid_color, self.compass_color):
+        for btn in (self.grid_color, self.compass_color, self.info_box_bg_color, self.info_box_text_color):
             btn.color_changed.connect(lambda _c: self.overlay_settings_changed.emit())
+        self.info_box_text_edit.textChanged.connect(self.overlay_settings_changed)
 
         # The style editors (Marker/Label/Background/Text effects/Connector group
         # boxes) are taller than the dock is usually given room for -- confirmed by a
@@ -597,8 +643,26 @@ class StylePanel(QWidget):
         self.compass_line_width.setValue(settings.compass.line_width)
         self.compass_arrow_size.setValue(settings.compass.arrow_length_fraction)
         self.compass_label_size.setValue(settings.compass.label_font_size)
+        # setPlainText always resets the cursor to the start, even when the new text
+        # is identical to what's already there -- and this method gets called after
+        # *every* overlay refresh, including this field's own textChanged edits (via
+        # _on_overlay_style_edited -> _refresh_overlays -> here). Without this guard,
+        # every keystroke would immediately reset the cursor back to position 0 --
+        # same class of bug as custom_name_edit's blockSignals guard in
+        # set_selected_annotation, different mechanism since this widget's own text
+        # really can be re-set from several different call sites.
+        if self.info_box_text_edit.toPlainText() != settings.info_box.text:
+            self.info_box_text_edit.setPlainText(settings.info_box.text)
+        self.info_box_corner.setCurrentIndex(self.info_box_corner.findData(settings.info_box.corner))
+        self.info_box_bg_color.set_color(settings.info_box.background_color)
+        self.info_box_bg_opacity.setValue(settings.info_box.background_opacity)
+        self.info_box_border_radius.setValue(settings.info_box.border_radius)
+        self.info_box_padding.setValue(settings.info_box.padding)
+        self.info_box_text_color.set_color(settings.info_box.text_color)
+        self.info_box_font_size.setValue(settings.info_box.font_size)
         self.blockSignals(block)
         self.reset_compass_btn.setVisible(settings.compass.anchor_x is not None)
+        self.reset_info_box_btn.setVisible(settings.info_box.anchor_x is not None)
 
     def pending_grid_style_values(self) -> dict:
         return {
@@ -617,6 +681,18 @@ class StylePanel(QWidget):
             "line_width": self.compass_line_width.value(),
             "arrow_length_fraction": self.compass_arrow_size.value(),
             "label_font_size": self.compass_label_size.value(),
+        }
+
+    def pending_info_box_style_values(self) -> dict:
+        return {
+            "text": self.info_box_text_edit.toPlainText(),
+            "corner": self.info_box_corner.currentData(),
+            "background_color": self.info_box_bg_color.hex_color,
+            "background_opacity": self.info_box_bg_opacity.value(),
+            "border_radius": self.info_box_border_radius.value(),
+            "padding": self.info_box_padding.value(),
+            "text_color": self.info_box_text_color.hex_color,
+            "font_size": self.info_box_font_size.value(),
         }
 
     def set_catalog_colors(self, colors: dict[str, str]) -> None:

@@ -16,6 +16,7 @@ from ..annotation.models import (
     CompassStyle,
     ConnectorStyle,
     GridStyle,
+    InfoBoxStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
@@ -113,9 +114,21 @@ _OVERLAY_LABEL_MIN_PT = 14.0
 
 def default_overlay_settings_for_image(width: int, height: int) -> OverlaySettings:
     label_size = max(_OVERLAY_LABEL_MIN_PT, min(width, height) * _OVERLAY_LABEL_FRACTION)
+    # Info box padding/border radius/margin scale with the same ratio as its font
+    # size, relative to InfoBoxStyle's own flat defaults -- same reasoning as
+    # label_size above (a flat size looks fine at one resolution, tiny at another),
+    # applied to the whole box's proportions rather than just its text.
+    info_box_defaults = InfoBoxStyle()
+    scale_factor = label_size / info_box_defaults.font_size
     return OverlaySettings(
         grid=GridStyle(label_font_size=label_size),
         compass=CompassStyle(label_font_size=label_size),
+        info_box=InfoBoxStyle(
+            font_size=label_size,
+            padding=info_box_defaults.padding * scale_factor,
+            border_radius=info_box_defaults.border_radius * scale_factor,
+            margin=info_box_defaults.margin * scale_factor,
+        ),
     )
 
 

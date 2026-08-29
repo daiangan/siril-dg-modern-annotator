@@ -165,6 +165,48 @@ class SirilBridge:
             return None
         return filename or None
 
+    def get_technical_metadata(self) -> dict[str, str]:
+        """Best-effort capture-session details (camera, telescope, filter, exposure,
+        etc.) for pre-populating the Info Box overlay's text (gui/main_window.py's
+        _default_info_box_text). RESEARCH.md confirms get_image_keywords() exposes
+        instrume/telescop/focal_length/pixel_size_x/pixel_size_y/date_obs as real
+        FKeywords attributes; filter/exptime/gain are plausible but UNCONFIRMED
+        attribute names on that dataclass, so every read here is individually guarded
+        via getattr and simply omitted if the attribute doesn't exist under this name
+        on this sirilpy version -- same reasoning as get_loaded_image_filename above.
+        Returns an empty dict on any failure rather than raising, since this is purely
+        for pre-filling editable text the user can always type themselves."""
+        siril = self._require_connection()
+        try:
+            keywords = siril.get_image_keywords()
+        except Exception:
+            return {}
+        if keywords is None:
+            return {}
+
+        def _first(*names: str):
+            for name in names:
+                value = getattr(keywords, name, None)
+                if value not in (None, "", 0):
+                    return value
+            return None
+
+        focal_length = _first("focal_length")
+        pixel_size = _first("pixel_size_x")
+        exposure = _first("exptime", "exposure")
+
+        fields = {
+            "Camera": _first("instrume"),
+            "Telescope": _first("telescop"),
+            "Focal Length": f"{focal_length} mm" if focal_length else None,
+            "Filter": _first("filter"),
+            "Exposure": f"{exposure} s" if exposure else None,
+            "Gain": _first("gain"),
+            "Pixel Size": f"{pixel_size} µm" if pixel_size else None,
+            "Date": _first("date_obs"),
+        }
+        return {k: str(v) for k, v in fields.items() if v is not None}
+
     def log(self, message: str) -> None:
         """Writes a line to Siril's own log/console panel -- distinct from this
         script's own Python logger, which the user won't see unless Siril was

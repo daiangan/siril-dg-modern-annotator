@@ -23,6 +23,8 @@ from .models import (
     ConnectorStyle,
     DecLabelPosition,
     GridStyle,
+    InfoBoxCorner,
+    InfoBoxStyle,
     LabelStyle,
     MarkerShape,
     MarkerStyle,
@@ -580,3 +582,55 @@ def compute_compass_geometry(wcs: SirilWcs, style: CompassStyle) -> CompassGeome
         east_end=_scaled_end(east_x, east_y),
         style=style,
     )
+
+
+# ---------------------------------------------------------------- info box ----
+
+
+@dataclass(frozen=True)
+class InfoBoxGeometry:
+    bbox: BBox
+    text: str
+    style: InfoBoxStyle
+
+
+_INFO_BOX_FONT_FAMILY = "Verdana"  # ships on both macOS and Windows -- see theme_dark.qss
+
+
+def compute_info_box_geometry(
+    text: str,
+    style: InfoBoxStyle,
+    image_width: float,
+    image_height: float,
+    measurer: TextMeasurer | None = None,
+) -> InfoBoxGeometry | None:
+    """text is passed in separately from style (unlike GridStyle/CompassStyle, whose
+    content is fully derived from the WCS) since it's free-form user-edited content,
+    not something this function can compute itself.
+
+    measurer is called with a *LabelStyle* wrapping style.font_size/padding under a
+    fixed font family, not style itself -- unlike LabelStyle, InfoBoxStyle carries no
+    font_family/bold/italic (no UI to customize a font family for this overlay was
+    asked for), so it doesn't duck-type as what qt_text_measurer/_pillow_text_measurer
+    actually need. This lets both of those (real font-metric measurers, for pixel-
+    accurate on-screen and export sizing) work completely unmodified against this
+    overlay too, same as they already do for LabelStyle."""
+    if not style.enabled or not text.strip():
+        return None
+    text = text.strip("\n")
+    measurer = measurer or default_text_measurer
+    measure_style = LabelStyle(font_family=_INFO_BOX_FONT_FAMILY, font_size=style.font_size, padding=style.padding)
+    w, h = measurer(text, measure_style)
+
+    if style.anchor_x is not None and style.anchor_y is not None:
+        x0, y0 = style.anchor_x, style.anchor_y
+    elif style.corner is InfoBoxCorner.TOP_LEFT:
+        x0, y0 = style.margin, style.margin
+    elif style.corner is InfoBoxCorner.TOP_RIGHT:
+        x0, y0 = image_width - w - style.margin, style.margin
+    elif style.corner is InfoBoxCorner.BOTTOM_RIGHT:
+        x0, y0 = image_width - w - style.margin, image_height - h - style.margin
+    else:  # BOTTOM_LEFT, the default
+        x0, y0 = style.margin, image_height - h - style.margin
+
+    return InfoBoxGeometry(bbox=BBox(x0, y0, x0 + w, y0 + h), text=text, style=style)

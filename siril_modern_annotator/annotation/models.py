@@ -129,13 +129,45 @@ class CompassStyle:
     anchor_y: float | None = None
 
 
+class InfoBoxCorner(str, Enum):
+    TOP_LEFT = "top_left"
+    TOP_RIGHT = "top_right"
+    BOTTOM_LEFT = "bottom_left"
+    BOTTOM_RIGHT = "bottom_right"
+
+
+@dataclass
+class InfoBoxStyle:
+    """Technical-details text overlay (camera/telescope/filter/etc.) -- image-level,
+    not per-object. text is pre-populated from FITS header metadata at image load
+    time (see MainWindow._default_info_box_text) and then freely editable, the same
+    "real text, not a placeholder" convention as an object's custom display name."""
+
+    enabled: bool = False  # off by default, same reasoning as GridStyle/CompassStyle
+    text: str = ""
+    corner: InfoBoxCorner = InfoBoxCorner.BOTTOM_LEFT
+    background_color: str = "#000000"
+    background_opacity: float = 0.6
+    border_radius: float = 6.0
+    padding: float = 10.0
+    text_color: str = "#f2f2f2"
+    font_size: float = 14.0
+    margin: float = 24.0  # gap from the image edge, native px
+    # None = default corner position (per `corner` above); an explicit override means
+    # the user dragged it -- same convention as CompassStyle.anchor_x/y.
+    anchor_x: float | None = None
+    anchor_y: float | None = None
+
+
 @dataclass
 class OverlaySettings:
-    """Bundles every image-level (as opposed to per-object) overlay -- currently the
-    RA/Dec grid and compass; a scale bar is a planned future addition here."""
+    """Bundles every image-level (as opposed to per-object) overlay -- the RA/Dec
+    grid, compass, and technical-details info box; a scale bar is a planned future
+    addition here."""
 
     grid: GridStyle = field(default_factory=GridStyle)
     compass: CompassStyle = field(default_factory=CompassStyle)
+    info_box: InfoBoxStyle = field(default_factory=InfoBoxStyle)
 
 
 @dataclass

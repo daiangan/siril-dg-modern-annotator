@@ -15,8 +15,8 @@ from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
-from ..annotation.models import CompassStyle, DecLabelPosition, GridStyle, RaLabelPosition
-from ..annotation.renderer import compute_compass_geometry, compute_grid_geometry
+from ..annotation.models import CompassStyle, DecLabelPosition, GridStyle, InfoBoxStyle, RaLabelPosition
+from ..annotation.renderer import compute_compass_geometry, compute_grid_geometry, compute_info_box_geometry
 from ..annotation.wcs import SirilWcs
 
 _LABEL_FONT_FAMILY = "Verdana"  # ships on both macOS and Windows -- see theme_dark.qss
@@ -143,6 +143,86 @@ class CompassItem(QGraphicsObject):
         painter.setFont(font)
         painter.drawText(QPointF(nx, ny), "N")
         painter.drawText(QPointF(ex, ey), "E")
+
+    def mousePressEvent(self, event):
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+        pos = self.pos()
+        self.moved.emit(pos.x(), pos.y())
+
+    def contextMenuEvent(self, event) -> None:
+        self.context_menu_requested.emit(event.screenPos())
+        event.accept()
+
+
+class InfoBoxItem(QGraphicsObject):
+    """Technical-details text box (camera/telescope/filter/etc.) -- draggable, corner-
+    anchored. Mirrors annotation_item.py's LabelItem almost exactly (local-origin
+    bbox + setPos() convention, rounded-rect background, moved signal on release):
+    both are "a background box with text a user can drag," this is just image-level
+    instead of per-object."""
+
+    moved = pyqtSignal(float, float)
+    context_menu_requested = pyqtSignal(QPoint)
+
+    def __init__(self, style: InfoBoxStyle, image_width: float, image_height: float, text_measurer=None):
+        super().__init__()
+        self.style = style
+        self.image_width = image_width
+        self.image_height = image_height
+        self.text_measurer = text_measurer
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setAcceptHoverEvents(True)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setZValue(25)  # above labels (20), below the compass (30)
+        self._sync_pos_from_model()
+
+    def _geometry(self):
+        return compute_info_box_geometry(
+            self.style.text, self.style, self.image_width, self.image_height, self.text_measurer
+        )
+
+    def _sync_pos_from_model(self) -> None:
+        geo = self._geometry()
+        self.prepareGeometryChange()
+        if geo is not None:
+            self.setPos(geo.bbox.x0, geo.bbox.y0)
+
+    def boundingRect(self) -> QRectF:
+        geo = self._geometry()
+        if geo is None:
+            return QRectF()
+        return QRectF(0.0, 0.0, geo.bbox.x1 - geo.bbox.x0, geo.bbox.y1 - geo.bbox.y0)
+
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
+        geo = self._geometry()
+        if geo is None:
+            return
+        style = geo.style
+        w = geo.bbox.x1 - geo.bbox.x0
+        h = geo.bbox.y1 - geo.bbox.y0
+        rect = QRectF(0.0, 0.0, w, h)
+
+        bg = QColor(style.background_color)
+        bg.setAlphaF(style.background_opacity)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(rect, style.border_radius, style.border_radius)
+
+        font = QFont(_LABEL_FONT_FAMILY)
+        font.setPointSizeF(max(1.0, style.font_size))
+        painter.setFont(font)
+        painter.setPen(QColor(style.text_color))
+        painter.drawText(
+            rect.adjusted(style.padding, style.padding, -style.padding, -style.padding),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            geo.text,
+        )
 
     def mousePressEvent(self, event):
         self.setCursor(Qt.CursorShape.ClosedHandCursor)

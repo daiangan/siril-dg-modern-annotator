@@ -41,6 +41,7 @@ from ..annotation.renderer import (
     compute_compass_geometry,
     compute_connector_points,
     compute_grid_geometry,
+    compute_info_box_geometry,
     compute_label_geometry,
     compute_marker_geometry,
     resolve_connector_color,
@@ -226,10 +227,11 @@ def render_annotations(
     draw = ImageDraw.Draw(overlay)
 
     # Grid first (underneath everything, matching GridItem's low z-value in the
-    # interactive canvas), objects next, compass last (always on top, matching
-    # CompassItem's high z-value there too) -- both need a real WCS, silently skipped
-    # otherwise (e.g. exporting before an image ever loaded, which shouldn't normally
-    # happen but costs nothing to guard).
+    # interactive canvas), objects next, info box after that, compass last (always on
+    # top, matching each item's z-value in the interactive canvas: grid=1, marker=10,
+    # label=20, info box=25, compass=30) -- grid/compass need a real WCS, silently
+    # skipped otherwise (e.g. exporting before an image ever loaded, which shouldn't
+    # normally happen but costs nothing to guard).
     if wcs is not None and overlay_settings is not None:
         _draw_grid(draw, wcs, overlay_settings.grid, scale)
 
@@ -241,6 +243,9 @@ def render_annotations(
         _draw_connector(draw, ann, marker, label, global_style, scale, catalog_colors)
         _draw_marker(draw, marker, scale)
         _draw_label(draw, label, scale)
+
+    if overlay_settings is not None:
+        _draw_info_box(draw, overlay_settings.info_box, native_width, native_height, scale)
 
     if wcs is not None and overlay_settings is not None:
         _draw_compass(draw, wcs, overlay_settings.compass, scale)
@@ -418,6 +423,25 @@ def _draw_compass(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float)
     font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.label_font_size), scale)
     draw.text(north, "N", fill=color, font=font, anchor="mm")
     draw.text(east, "E", fill=color, font=font, anchor="mm")
+
+
+def _draw_info_box(draw: ImageDraw.ImageDraw, style, image_width: float, image_height: float, scale: float) -> None:
+    # compute_info_box_geometry wraps style's font_size/padding into a LabelStyle
+    # internally before calling this measurer -- _pillow_text_measurer only needs
+    # font_family/font_size from that wrapper, both present, so this Just Works the
+    # same way it already does for per-object labels (see compute_label_geometry's
+    # own _pillow_text_measurer call below).
+    geo = compute_info_box_geometry(style.text, style, image_width, image_height, _pillow_text_measurer)
+    if geo is None:
+        return
+    x0, y0 = _scaled((geo.bbox.x0, geo.bbox.y0), scale)
+    x1, y1 = _scaled((geo.bbox.x1, geo.bbox.y1), scale)
+    bg = _rgba(style.background_color, style.background_opacity)
+    draw.rounded_rectangle([x0, y0, x1, y1], radius=style.border_radius * scale, fill=bg)
+    font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.font_size), scale)
+    text_color = _rgba(style.text_color, 1.0)
+    padding = style.padding * scale
+    draw.multiline_text((x0 + padding, y0 + padding), geo.text, fill=text_color, font=font)
 
 
 def export_image(

@@ -76,3 +76,72 @@ def test_get_loaded_image_filename_swallows_any_other_exception():
     bridge = SirilBridge()
     bridge._siril = _BrokenSiril()
     assert bridge.get_loaded_image_filename() is None
+
+
+class _FakeKeywords:
+    """Mimics sirilpy's FKeywords -- only the attributes actually set are present,
+    same as a real dataclass instance where unset fields commonly default to None
+    (or simply don't exist under an unconfirmed name, on an older sirilpy)."""
+
+    def __init__(self, **attrs):
+        for name, value in attrs.items():
+            setattr(self, name, value)
+
+
+class _FakeSirilWithKeywords:
+    def __init__(self, keywords):
+        self._keywords = keywords
+
+    def get_image_keywords(self):
+        return self._keywords
+
+
+def test_get_technical_metadata_reads_confirmed_fields():
+    keywords = _FakeKeywords(instrume="ZWO ASI2600MM", telescop="RC8", focal_length=1600.0, date_obs="2026-01-01")
+    bridge = SirilBridge()
+    bridge._siril = _FakeSirilWithKeywords(keywords)
+    metadata = bridge.get_technical_metadata()
+    assert metadata["Camera"] == "ZWO ASI2600MM"
+    assert metadata["Telescope"] == "RC8"
+    assert metadata["Focal Length"] == "1600.0 mm"
+    assert metadata["Date"] == "2026-01-01"
+
+
+def test_get_technical_metadata_omits_fields_the_keywords_object_does_not_have():
+    """filter/gain/exptime are unconfirmed attribute names -- a sirilpy version (or
+    mock) without them must simply omit those lines, not raise."""
+    keywords = _FakeKeywords(instrume="TestCam")
+    bridge = SirilBridge()
+    bridge._siril = _FakeSirilWithKeywords(keywords)
+    metadata = bridge.get_technical_metadata()
+    assert metadata == {"Camera": "TestCam"}
+
+
+def test_get_technical_metadata_omits_none_and_empty_and_zero_values():
+    keywords = _FakeKeywords(instrume="TestCam", telescop=None, filter="", gain=0)
+    bridge = SirilBridge()
+    bridge._siril = _FakeSirilWithKeywords(keywords)
+    metadata = bridge.get_technical_metadata()
+    assert metadata == {"Camera": "TestCam"}
+
+
+def test_get_technical_metadata_empty_when_keywords_is_none():
+    bridge = SirilBridge()
+    bridge._siril = _FakeSirilWithKeywords(None)
+    assert bridge.get_technical_metadata() == {}
+
+
+def test_get_technical_metadata_swallows_missing_method_and_other_exceptions():
+    class _SirilWithoutKeywordsMethod:
+        pass
+
+    class _BrokenSiril:
+        def get_image_keywords(self):
+            raise RuntimeError("some unexpected sirilpy-internal failure")
+
+    bridge = SirilBridge()
+    bridge._siril = _SirilWithoutKeywordsMethod()
+    assert bridge.get_technical_metadata() == {}
+
+    bridge._siril = _BrokenSiril()
+    assert bridge.get_technical_metadata() == {}
