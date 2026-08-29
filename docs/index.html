@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="DG Modern Annotator turns a plate-solved Siril image into a fully labeled, presentation-ready image, with draggable markers and labels, full styling control, and full-resolution export.">
+<title>DG Modern Annotator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0a0b11;
+    --bg-hero-1: #0d0f1a;
+    --bg-hero-2: #131526;
+    --bg-elevated: #13141d;
+    --bg-elevated-2: #1a1c28;
+    --bg-elevated-3: #20222f;
+    --border: #262838;
+    --border-soft: #1c1e2b;
+    --text: #ecedf2;
+    --text-muted: #9498ab;
+    --text-faint: #5c6178;
+    --accent: #f2c572;
+    --accent-dim: #c9a45f;
+    --accent-soft: rgba(242, 197, 114, 0.13);
+    --mark-teal: #7fc8c4;
+    --mark-lavender: #b79ced;
+    --mark-coral: #f2938c;
+    --mark-slate: #8fa9d6;
+    --mark-yellow: #f5e6a3;
+
+    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-body: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    text-wrap: balance;
+    margin: 0;
+    color: var(--text);
+  }
+
+  p { margin: 0; }
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; display: block; }
+
+  a:focus-visible,
+  button:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 32px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 20px;
+    height: 1px;
+    background: var(--accent-dim);
+    display: inline-block;
+  }
+
+  /* ---------------------------------------------------------------- nav */
+
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(10, 11, 17, 0.82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .nav-inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 17px;
+    letter-spacing: 0.01em;
+  }
+  .brand-mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(155deg, var(--mark-lavender) 0%, var(--accent) 100%);
+    flex-shrink: 0;
+    position: relative;
+  }
+  .brand-mark::after {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(10, 11, 17, 0.55);
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    font-size: 14.5px;
+    color: var(--text-muted);
+  }
+  .nav-links a { transition: color 0.15s ease; }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  @media (max-width: 760px) {
+    .nav-links { display: none; }
+  }
+
+  /* ---------------------------------------------------------------- buttons */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 14.5px;
+    padding: 12px 22px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary {
+    background: var(--accent);
+    color: #211605;
+  }
+  .btn-primary:hover { background: #f6d493; }
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .btn-ghost:hover { border-color: var(--text-faint); background: var(--bg-elevated-2); }
+  .btn-small { padding: 9px 16px; font-size: 13.5px; }
+
+  /* ---------------------------------------------------------------- hero */
+
+  .hero {
+    position: relative;
+    padding: 96px 0 60px;
+    background:
+      radial-gradient(ellipse 900px 500px at 18% -10%, rgba(183, 156, 237, 0.16), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 88% 10%, rgba(242, 197, 114, 0.10), transparent 55%),
+      linear-gradient(180deg, var(--bg-hero-1) 0%, var(--bg) 100%);
+    overflow: hidden;
+  }
+  #starfield {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.7;
+    pointer-events: none;
+  }
+  .hero-inner {
+    position: relative;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 32px;
+  }
+  .hero-copy {
+    max-width: 680px;
+    margin: 0 auto;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+  }
+  .hero-copy .eyebrow { justify-content: center; }
+  .hero h1 {
+    font-size: clamp(38px, 5.6vw, 62px);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+  }
+  .hero h1 em {
+    font-style: italic;
+    color: var(--accent);
+  }
+  .hero-sub {
+    font-size: 18px;
+    color: var(--text-muted);
+    max-width: 560px;
+    line-height: 1.65;
+  }
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 6px;
+  }
+  .hero-meta {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.03em;
+  }
+  .hero-meta strong { color: var(--text-muted); font-weight: 500; }
+
+  /* ---------------------------------------------------------------- annotated hero image */
+
+  .annotated-frame {
+    position: relative;
+    max-width: 980px;
+    margin: 64px auto 0;
+    border-radius: 16px;
+    overflow: visible;
+  }
+  .annotated-photo {
+    position: relative;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.02);
+    aspect-ratio: 16 / 9.2;
+    background:
+      radial-gradient(circle at 47% 52%, rgba(255, 226, 178, 0.9) 0%, rgba(255, 200, 150, 0.5) 6%, rgba(190, 130, 130, 0.28) 14%, transparent 30%),
+      radial-gradient(ellipse 60% 40% at 47% 52%, rgba(150, 110, 140, 0.35), transparent 70%),
+      radial-gradient(circle at 20% 25%, rgba(140,170,220,0.10), transparent 40%),
+      #05060a;
+  }
+  .annotated-photo canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .annotated-photo .placeholder-tag {
+    position: absolute;
+    bottom: 14px;
+    left: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: rgba(255,255,255,0.45);
+    letter-spacing: 0.04em;
+    background: rgba(0,0,0,0.35);
+    padding: 4px 9px;
+    border-radius: 5px;
+    backdrop-filter: blur(3px);
+  }
+
+  .marker-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
+  .marker-svg path { fill: none; stroke-width: 1.4; opacity: 0.85; }
+  .marker-svg circle.dot { opacity: 0.95; }
+
+  .callout {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 13px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    background: rgba(15, 16, 24, 0.86);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.08);
+    z-index: 3;
+    box-shadow: 0 8px 22px -8px rgba(0,0,0,0.5);
+  }
+  .callout .dot-inline { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+  .c-teal    { top: 9%;  left: 4%; color: var(--mark-teal); }
+  .c-amber   { top: 47%; right: 3%; color: var(--accent); }
+  .c-lavender{ bottom: 11%; left: 6%; color: var(--mark-lavender); }
+  .c-coral   { top: 16%; right: 6%; color: var(--mark-coral); }
+
+  @media (max-width: 780px) {
+    .callout { position: static; margin: 8px 6px; display: inline-flex; }
+    .marker-svg { display: none; }
+    .annotated-photo { aspect-ratio: 4/3; }
+  }
+
+  /* ---------------------------------------------------------------- sections generic */
+
+  section { padding: 108px 0; }
+  .section-head {
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    margin-bottom: 56px;
+  }
+  .section-head.center { max-width: 620px; margin-left: auto; margin-right: auto; text-align: center; align-items: center; }
+  .section-head h2 { font-size: clamp(28px, 3.4vw, 38px); line-height: 1.18; }
+  .section-head p { color: var(--text-muted); font-size: 16.5px; line-height: 1.65; }
+
+  /* ---------------------------------------------------------------- problem */
+
+  .problem {
+    background: var(--bg-hero-1);
+    border-top: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .problem-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 64px;
+    align-items: center;
+  }
+  .problem-copy p { color: var(--text-muted); font-size: 17px; line-height: 1.75; }
+  .problem-copy p + p { margin-top: 18px; }
+  .problem-copy strong { color: var(--text); font-weight: 600; }
+  .problem-quote {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 22px;
+    line-height: 1.5;
+    color: var(--text);
+    border-left: 2px solid var(--accent);
+    padding-left: 22px;
+    margin-top: 28px;
+  }
+  .stat-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 30px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .stat-row { display: flex; align-items: baseline; gap: 14px; }
+  .stat-num { font-family: var(--font-display); font-size: 40px; color: var(--accent); font-weight: 600; line-height: 1; }
+  .stat-label { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+  .stat-card hr { border: none; border-top: 1px solid var(--border-soft); margin: 2px 0; }
+
+  @media (max-width: 860px) {
+    .problem-grid { grid-template-columns: 1fr; gap: 40px; }
+  }
+
+  /* ---------------------------------------------------------------- features */
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .feature {
+    background: var(--bg-elevated);
+    padding: 34px 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    transition: background 0.2s ease;
+  }
+  .feature:hover { background: var(--bg-elevated-2); }
+  .feature-mark {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .feature-mark .dot-inline { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .feature-mark .line-inline { flex: 1; height: 1px; background: currentColor; opacity: 0.35; max-width: 40px; }
+  .feature h3 { font-size: 18px; font-weight: 600; color: var(--text); }
+  .feature p { font-size: 14.5px; color: var(--text-muted); line-height: 1.65; }
+
+  @media (max-width: 860px) {
+    .feature-grid { grid-template-columns: 1fr; }
+  }
+  @media (min-width: 861px) and (max-width: 1080px) {
+    .feature-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ---------------------------------------------------------------- how it works */
+
+  .howitworks { background: var(--bg-hero-1); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 28px;
+  }
+  .step { display: flex; flex-direction: column; gap: 16px; }
+  .step-num {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .step-num::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .step h3 { font-size: 16.5px; font-weight: 700; font-family: var(--font-body); color: var(--text); }
+  .step p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+  .shot {
+    aspect-ratio: 16/10.5;
+    border-radius: 10px;
+    border: 1px dashed var(--border);
+    background: var(--bg-elevated);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-faint);
+    position: relative;
+    overflow: hidden;
+  }
+  .shot svg { opacity: 0.5; }
+  .shot-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--text-faint);
+    text-align: center;
+    padding: 0 12px;
+  }
+
+  @media (max-width: 900px) {
+    .steps { grid-template-columns: repeat(2, 1fr); row-gap: 44px; }
+  }
+  @media (max-width: 560px) {
+    .steps { grid-template-columns: 1fr; }
+  }
+
+  /* ---------------------------------------------------------------- gallery */
+
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 22px;
+  }
+  .gallery-item { display: flex; flex-direction: column; gap: 12px; }
+  .gallery-item .shot { aspect-ratio: 16/10; }
+  .gallery-caption { font-size: 14px; color: var(--text-muted); display: flex; align-items: center; gap: 9px; }
+  .gallery-caption .dot-inline { width: 6px; height: 6px; border-radius: 50%; }
+
+  @media (max-width: 760px) {
+    .gallery-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ---------------------------------------------------------------- overlays spotlight */
+
+  .overlay-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  .overlay-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .overlay-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+  }
+  .overlay-card h3 { font-size: 16.5px; font-family: var(--font-body); font-weight: 700; }
+  .overlay-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+  @media (max-width: 860px) {
+    .overlay-strip { grid-template-columns: 1fr; }
+  }
+
+  /* ---------------------------------------------------------------- get started */
+
+  .getstarted {
+    position: relative;
+    border-radius: 22px;
+    margin: 0 32px;
+    padding: 72px 56px;
+    background:
+      radial-gradient(ellipse 600px 380px at 85% -20%, rgba(242, 197, 114, 0.12), transparent 60%),
+      radial-gradient(ellipse 500px 380px at 10% 120%, rgba(183, 156, 237, 0.10), transparent 60%),
+      var(--bg-hero-2);
+    border: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 56px;
+    align-items: center;
+  }
+  .getstarted-copy h2 { font-size: clamp(26px, 3.2vw, 34px); margin-bottom: 16px; }
+  .getstarted-copy p { color: var(--text-muted); font-size: 16px; line-height: 1.65; max-width: 480px; }
+  .getstarted-actions { display: flex; gap: 14px; margin-top: 28px; flex-wrap: wrap; }
+  .req-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  .req-list li {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    font-size: 14.5px;
+    color: var(--text-muted);
+  }
+  .req-list .req-num { font-family: var(--font-mono); color: var(--accent); font-size: 13px; flex-shrink: 0; width: 18px; }
+  .req-list strong { color: var(--text); font-weight: 600; }
+  .req-list code {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    background: var(--bg-elevated-3);
+    padding: 2px 7px;
+    border-radius: 5px;
+    color: var(--mark-yellow);
+  }
+
+  @media (max-width: 860px) {
+    .getstarted { grid-template-columns: 1fr; padding: 48px 28px; margin: 0 16px; }
+  }
+
+  /* ---------------------------------------------------------------- footer */
+
+  footer {
+    border-top: 1px solid var(--border-soft);
+    padding: 56px 0 40px;
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 40px;
+    flex-wrap: wrap;
+  }
+  .footer-brand { display: flex; flex-direction: column; gap: 12px; max-width: 320px; }
+  .footer-brand p { color: var(--text-faint); font-size: 13.5px; line-height: 1.6; }
+  .footer-links { display: flex; gap: 52px; flex-wrap: wrap; }
+  .footer-col { display: flex; flex-direction: column; gap: 12px; }
+  .footer-col-title { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 4px; }
+  .footer-col a { font-size: 14px; color: var(--text-muted); transition: color 0.15s ease; }
+  .footer-col a:hover { color: var(--text); }
+  .footer-bottom {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-soft);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+  }
+
+  ::selection { background: var(--accent-soft); color: var(--text); }
+</style>
+</head><body>
+
+<div class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      DG Modern Annotator
+    </div>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#get-started">Get started</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost btn-small" href="https://github.com/daiangan/siril-dg-modern-annotator" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-primary btn-small" href="https://github.com/daiangan/siril-dg-modern-annotator/releases/latest">Download</a>
+    </div>
+  </div>
+</div>
+
+<header class="hero">
+  <canvas id="starfield"></canvas>
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <div class="eyebrow">A Scripts-menu tool for Siril</div>
+      <h1>The frame already knows<br>what&rsquo;s <em>in</em> it.</h1>
+      <p class="hero-sub">
+        DG Modern Annotator reads your Siril plate-solve and turns it into a fully
+        labeled, presentation-ready image &mdash; draggable markers and labels, real
+        typography control, coordinate overlays, and full-resolution export.
+        No detour through another editor required.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/daiangan/siril-dg-modern-annotator/releases/latest">
+          Download for Siril
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/daiangan/siril-dg-modern-annotator">
+          View source
+        </a>
+      </div>
+      <div class="hero-meta">Free &middot; MIT licensed &middot; Siril 1.4.4+</div>
+    </div>
+
+    <div class="annotated-frame">
+      <div class="annotated-photo">
+        <canvas id="nebulaCanvas"></canvas>
+        <svg class="marker-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M 8 12 L 30 22 L 46 40" vector-effect="non-scaling-stroke" stroke="#7fc8c4"></path>
+          <circle class="dot" cx="46" cy="40" r="1.3" fill="#7fc8c4"></circle>
+          <path d="M 94 50 L 74 52 L 58 50" vector-effect="non-scaling-stroke" stroke="#f2c572"></path>
+          <circle class="dot" cx="58" cy="50" r="1.3" fill="#f2c572"></circle>
+          <path d="M 10 86 L 32 74 L 42 58" vector-effect="non-scaling-stroke" stroke="#b79ced"></path>
+          <circle class="dot" cx="42" cy="58" r="1.3" fill="#b79ced"></circle>
+          <path d="M 92 18 L 70 26 L 60 38" vector-effect="non-scaling-stroke" stroke="#f2938c"></path>
+          <circle class="dot" cx="60" cy="38" r="1.3" fill="#f2938c"></circle>
+        </svg>
+        <div class="callout c-teal"><span class="dot-inline" style="background:currentColor"></span>Drag any label</div>
+        <div class="callout c-amber"><span class="dot-inline" style="background:currentColor"></span>Auto-arranged</div>
+        <div class="callout c-lavender"><span class="dot-inline" style="background:currentColor"></span>Per-catalog color</div>
+        <div class="callout c-coral"><span class="dot-inline" style="background:currentColor"></span>Ellipse for galaxies</div>
+        <div class="placeholder-tag">placeholder &mdash; swap for a real annotated export</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="problem">
+  <div class="wrap problem-grid">
+    <div class="problem-copy">
+      <div class="eyebrow">Why this exists</div>
+      <h2 style="margin: 18px 0 22px; font-size: clamp(26px, 3.2vw, 34px);">Plate-solving tells you what&rsquo;s there. It doesn&rsquo;t make it presentable.</h2>
+      <p>
+        Siril can already tell you that a frame contains M31, NGC&nbsp;206, and M110 &mdash;
+        but that information lives in a dialog, not in the image you actually want to
+        share. Getting from &ldquo;plate-solved&rdquo; to &ldquo;labeled and ready to post&rdquo;
+        usually means exporting into another editor and placing text boxes by hand,
+        one image at a time, starting over every session.
+      </p>
+      <p>
+        <strong>DG Modern Annotator skips that detour.</strong> It runs from Siril&rsquo;s
+        own Scripts menu, reads the same WCS solution Siril already computed, and gives
+        you a real interactive canvas &mdash; drag labels where you want them, style
+        markers per catalog, add a coordinate grid or compass, and export at full
+        resolution. Set your style once; every image after starts from where you left off.
+      </p>
+      <div class="problem-quote">
+        &ldquo;Built for the plate-solved image you already have &mdash; not a general
+        graphics tool taught to understand astronomy.&rdquo;
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-row">
+        <span class="stat-num">6</span>
+        <span class="stat-label">catalogs searched automatically &mdash; Messier, NGC, IC, Sharpless, LDN, and bright stars, each with its own color.</span>
+      </div>
+      <hr>
+      <div class="stat-row">
+        <span class="stat-num">4</span>
+        <span class="stat-label">export formats at true native resolution &mdash; JPEG, PNG, 8-bit TIFF, 16-bit TIFF.</span>
+      </div>
+      <hr>
+      <div class="stat-row">
+        <span class="stat-num">0</span>
+        <span class="stat-label">manual installs &mdash; every dependency sets itself up inside Siril the first time you run it.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">What it does</div>
+      <h2>Everything a labeled image needs, in one canvas.</h2>
+      <p>Each marker color below is the same one you&rsquo;ll see on your own image &mdash; the app assigns a color per catalog, and this page borrows it.</p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-teal)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Automatic detection</h3>
+        <p>Every Messier, NGC, IC, Sharpless, LDN, and bright star in frame, found automatically &mdash; VizieR online, Siril&rsquo;s own bundled catalogs offline.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--accent)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Drag anything</h3>
+        <p>Markers and labels move independently. Auto Arrange keeps new labels out of each other&rsquo;s way; Reset Position undoes a single drag without touching the rest.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-lavender)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Shapes that fit</h3>
+        <p>Circles for point sources, brackets for clusters, and a rotatable ellipse for galaxies that were never round to begin with.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-coral)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Style once, reuse always</h3>
+        <p>Per-catalog colors, typography, and marker style save as a preset and carry into your next image &mdash; nothing to re-decide session to session.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-slate)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Sky context, if you want it</h3>
+        <p>An RA/Dec coordinate grid, a compass, and a technical-details panel pulled straight from the FITS header &mdash; all optional, all draggable, off by default.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-yellow)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Full-resolution export</h3>
+        <p>JPEG, PNG, 8-bit or 16-bit TIFF, at the image&rsquo;s true native resolution &mdash; independent of whatever you&rsquo;re previewing on screen.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works" class="howitworks">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Visual walkthrough</div>
+      <h2>From plate-solve to finished export, in four steps.</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <div class="shot">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="14" rx="1.5"></rect><circle cx="8.5" cy="9.5" r="1.5"></circle><path d="M3 15l4.5-4 4 3.5L17 9l4 4"></path></svg>
+          <div class="shot-label">screenshot &mdash; main canvas after load</div>
+        </div>
+        <h3>Load &amp; detect</h3>
+        <p>Open a plate-solved image in Siril and run the script. Objects in frame appear automatically, already laid out.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <div class="shot">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"></circle><path d="M12 4v3M12 17v3M4 12h3M17 12h3"></path></svg>
+          <div class="shot-label">screenshot &mdash; dragging a label</div>
+        </div>
+        <h3>Arrange</h3>
+        <p>Drag markers and labels by hand, or let Auto Arrange do it. Switch a marker to an ellipse for anything that isn&rsquo;t round.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <div class="shot">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>
+          <div class="shot-label">screenshot &mdash; style panel + overlays</div>
+        </div>
+        <h3>Add context</h3>
+        <p>Turn on the coordinate grid, compass, or technical info box if you want them. Pick colors and fonts once, globally or per object.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <div class="shot">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3v12m0 0l-4-4m4 4l4-4"></path><path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"></path></svg>
+          <div class="shot-label">screenshot &mdash; export dialog</div>
+        </div>
+        <h3>Export</h3>
+        <p>One click, full resolution, independent of whatever preview size you were looking at &mdash; ready to post or print.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="screenshots">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Screenshots</div>
+      <h2>What it looks like inside Siril.</h2>
+      <p>Real screenshots go here &mdash; the frames below are placeholders sized to drop them in directly.</p>
+    </div>
+    <div class="gallery-grid">
+      <div class="gallery-item">
+        <div class="shot">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="14" rx="1.5"></rect><circle cx="8.5" cy="9.5" r="1.5"></circle><path d="M3 15l4.5-4 4 3.5L17 9l4 4"></path></svg>
+          <div class="shot-label">main-canvas.png</div>
+        </div>
+        <div class="gallery-caption"><span class="dot-inline" style="background:var(--mark-teal)"></span>The interactive canvas, mid-edit</div>
+      </div>
+      <div class="gallery-item">
+        <div class="shot">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <div class="shot-label">object-panel.png</div>
+        </div>
+        <div class="gallery-caption"><span class="dot-inline" style="background:var(--accent)"></span>The Objects panel &mdash; search, filter, toggle</div>
+      </div>
+      <div class="gallery-item">
+        <div class="shot">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 15 0 010 18a9 15 0 010-18"></path></svg>
+          <div class="shot-label">style-panel.png</div>
+        </div>
+        <div class="gallery-caption"><span class="dot-inline" style="background:var(--mark-lavender)"></span>Per-catalog colors &amp; typography</div>
+      </div>
+      <div class="gallery-item">
+        <div class="shot">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 4l7 15 2-6 6-2-15-7z"></path></svg>
+          <div class="shot-label">exported-result.jpg</div>
+        </div>
+        <div class="gallery-caption"><span class="dot-inline" style="background:var(--mark-coral)"></span>A finished, full-resolution export</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="howitworks" style="padding-top: 96px;">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Overlays</div>
+      <h2>Sky context, when you want it.</h2>
+      <p>All three are off by default and turn on with one click from the toolbar &mdash; each is fully draggable and stays out of your way otherwise.</p>
+    </div>
+    <div class="overlay-strip">
+      <div class="overlay-card">
+        <div class="overlay-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"></path></svg>
+        </div>
+        <h3>RA/Dec grid</h3>
+        <p>A coordinate grid computed from your image&rsquo;s own WCS solution, labeled in sexagesimal &mdash; spacing picks itself based on field of view.</p>
+      </div>
+      <div class="overlay-card">
+        <div class="overlay-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><path d="M12 3v6m0 6v6M12 9l3 3-3 3-3-3z"></path></svg>
+        </div>
+        <h3>Compass</h3>
+        <p>North/East direction arrows, derived from the actual plate solve &mdash; correct even when the field is rotated or mirrored.</p>
+      </div>
+      <div class="overlay-card">
+        <div class="overlay-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M8 9h8M8 13h5"></path></svg>
+        </div>
+        <h3>Info box</h3>
+        <p>Camera, telescope, filter, exposure &mdash; pre-filled from the FITS header and freely editable, positioned at any corner.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="get-started">
+  <div class="getstarted">
+    <div class="getstarted-copy">
+      <div class="eyebrow">Get started</div>
+      <h2>Two steps, then it&rsquo;s in your Scripts menu.</h2>
+      <p>
+        Download the script, drop it into Siril&rsquo;s scripts folder, relaunch.
+        Everything else &mdash; PyQt6, astropy, astroquery &mdash; installs itself into
+        Siril&rsquo;s own Python environment the first time you run it.
+      </p>
+      <div class="getstarted-actions">
+        <a class="btn btn-primary" href="https://github.com/daiangan/siril-dg-modern-annotator/releases/latest">Download for Siril</a>
+        <a class="btn btn-ghost" href="https://github.com/daiangan/siril-dg-modern-annotator#readme">Read the docs</a>
+      </div>
+    </div>
+    <ul class="req-list">
+      <li><span class="req-num">01</span><span><strong>Siril 1.4.4+</strong>, with a plate-solved image loaded.</span></li>
+      <li><span class="req-num">02</span><span>Copy <code>DG_Modern_Annotator.py</code> into your Scripts folder &mdash; find the path under <strong>Preferences &rarr; Scripts</strong>.</span></li>
+      <li><span class="req-num">03</span><span>Relaunch Siril. Find it under <strong>Scripts &rarr; DG Modern Annotator</strong>.</span></li>
+      <li><span class="req-num">04</span><span>Run it on any plate-solved image &mdash; dependencies install themselves on first use.</span></li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          DG Modern Annotator
+        </div>
+        <p>A modern annotation tool for Siril, built by an astrophotographer for astrophotographers. Free and open source under the MIT license.</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <div class="footer-col-title">Project</div>
+          <a href="https://github.com/daiangan/siril-dg-modern-annotator">Source on GitHub</a>
+          <a href="https://github.com/daiangan/siril-dg-modern-annotator/releases/latest">Latest release</a>
+          <a href="https://github.com/daiangan/siril-dg-modern-annotator/blob/main/LICENSE">MIT license</a>
+        </div>
+        <div class="footer-col">
+          <div class="footer-col-title">Author</div>
+          <a href="https://daiangan.com" target="_blank" rel="noopener">daiangan.com</a>
+          <a href="mailto:daian@ganmedia.com">daian@ganmedia.com</a>
+          <a href="https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA" target="_blank" rel="noopener">Buy me a coffee</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 Daian Gan</span>
+      <span>Not affiliated with the Siril project</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Hero starfield -- ambient, slow, low-opacity twinkle.
+    var sf = document.getElementById('starfield');
+    if (sf) {
+      var ctx = sf.getContext('2d');
+      var stars = [];
+      function sizeCanvas() {
+        var rect = sf.parentElement.getBoundingClientRect();
+        sf.width = rect.width * devicePixelRatio;
+        sf.height = rect.height * devicePixelRatio;
+        sf.style.width = rect.width + 'px';
+        sf.style.height = rect.height + 'px';
+      }
+      function makeStars() {
+        var count = Math.floor((sf.width * sf.height) / 9000);
+        stars = [];
+        for (var i = 0; i < count; i++) {
+          stars.push({
+            x: Math.random() * sf.width,
+            y: Math.random() * sf.height,
+            r: Math.random() * 1.1 * devicePixelRatio + 0.3,
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.4 + Math.random() * 0.6
+          });
+        }
+      }
+      sizeCanvas();
+      makeStars();
+      window.addEventListener('resize', function () { sizeCanvas(); makeStars(); });
+
+      var t = 0;
+      function draw() {
+        ctx.clearRect(0, 0, sf.width, sf.height);
+        for (var i = 0; i < stars.length; i++) {
+          var s = stars[i];
+          var alpha = reduceMotion ? 0.55 : 0.35 + 0.4 * Math.abs(Math.sin(t * 0.001 * s.speed + s.phase));
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(236,237,242,' + alpha.toFixed(3) + ')';
+          ctx.fill();
+        }
+        t += 16;
+        if (!reduceMotion) requestAnimationFrame(draw);
+      }
+      draw();
+    }
+
+    // Hero mockup nebula -- static-ish soft field, drawn once.
+    var nc = document.getElementById('nebulaCanvas');
+    if (nc) {
+      var nctx = nc.getContext('2d');
+      function sizeNebula() {
+        var rect = nc.parentElement.getBoundingClientRect();
+        nc.width = rect.width * devicePixelRatio;
+        nc.height = rect.height * devicePixelRatio;
+      }
+      sizeNebula();
+      var rng = (function seeded(seed) {
+        return function () { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+      })(42);
+      for (var i = 0; i < 140; i++) {
+        var x = rng() * nc.width, y = rng() * nc.height;
+        var r = rng() * 1.4 * devicePixelRatio + 0.3;
+        nctx.beginPath();
+        nctx.arc(x, y, r, 0, Math.PI * 2);
+        nctx.fillStyle = 'rgba(255,255,255,' + (0.25 + rng() * 0.55).toFixed(2) + ')';
+        nctx.fill();
+      }
+      window.addEventListener('resize', sizeNebula);
+    }
+
+    // Gentle reveal-on-scroll for sections.
+    if (!reduceMotion && 'IntersectionObserver' in window) {
+      var targets = document.querySelectorAll('section, .getstarted');
+      targets.forEach(function (el) {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(14px)';
+        el.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
+      });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.style.opacity = '1';
+            entry.target.style.transform = 'translateY(0)';
+            io.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.08 });
+      targets.forEach(function (el) { io.observe(el); });
+    }
+  })();
+</script>
+</body>
+</html>
