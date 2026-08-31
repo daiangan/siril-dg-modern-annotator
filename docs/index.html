@@ -446,6 +446,7 @@
   }
   .feature-mark .dot-inline { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
   .feature-mark .line-inline { flex: 1; height: 1px; background: currentColor; opacity: 0.35; max-width: 40px; }
+  .feature-mark .tip-badge { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: currentColor; white-space: nowrap; }
   .feature h3 { font-size: 18px; font-weight: 600; color: var(--text); }
   .feature p { font-size: 14.5px; color: var(--text-muted); line-height: 1.65; }
 
@@ -914,6 +915,63 @@
         </div>
         <h3>Info box</h3>
         <p>Camera, telescope, filter, exposure &mdash; pre-filled from the FITS header and freely editable, positioned at any corner.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tips">
+  <div class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">Easy to miss</div>
+      <h2>Right-click everything.</h2>
+      <p>Every marker, label, and overlay has its own right-click menu &mdash; none of it is announced on screen, so here&rsquo;s the full list.</p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-teal)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="tip-badge">Right-click</span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>Empty sky</h3>
+        <p>Add Custom Object &mdash; places a marker anywhere, with a real RA/Dec position from your plate solve. For a comet, a satellite trail, anything not in a catalog.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--accent)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="tip-badge">Right-click</span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>A marker or label</h3>
+        <p>Hide it, delete it (custom objects only), or reset it back to its catalog position &mdash; only shown once you&rsquo;ve actually dragged it.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-lavender)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="tip-badge">Right-click</span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>The compass or info box</h3>
+        <p>Reset Position snaps it back to its default corner, once you&rsquo;ve dragged it somewhere else.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-coral)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="tip-badge">Double-click</span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>A marker or label</h3>
+        <p>Jumps straight to that object&rsquo;s own style tab &mdash; no need to hunt through the panel for it.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-slate)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="tip-badge">Click</span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>The info box</h3>
+        <p>Jumps straight to its text field, ready to edit &mdash; the fastest way in when you want to tweak the camera/telescope details.</p>
       </div>
     </div>
   </div>
