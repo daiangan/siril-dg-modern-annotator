@@ -58,6 +58,7 @@ _HEADER_TEMPLATE = '''#!/usr/bin/env python3
 Version: {version}
 
 Author: Daian Gan
+Documentation and gallery: https://daiangan.github.io/siril-dg-modern-annotator/
 Contact and support: daian@ganmedia.com, https://daiangan.com,
     https://github.com/daiangan/siril-dg-modern-annotator
 
