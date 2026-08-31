@@ -413,15 +413,35 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "No Image", "No image is currently loaded in Siril.")
                 return
             self.image_info = self.bridge.get_image_info()
-            if not self.image_info.plate_solved:
+            header = self.bridge.get_wcs_header_dict()
+            # Siril's own image_info.plate_solved reflects only its PLTSOLVD FITS
+            # keyword -- its own internal "I solved this" bookkeeping flag, not a WCS
+            # standard. An image solved by another tool (Astrometry.net, ASTAP,
+            # PixInsight, or a telescope archive's own pipeline -- confirmed via a real
+            # Grantecan/GTC download that has a complete, valid TAN-SIP solution but no
+            # PLTSOLVD card at all) has no reason to carry that keyword. We already build
+            # our own astropy.wcs.WCS straight from the header for every actual
+            # coordinate transform (ARCHITECTURE.md #4) rather than trusting Siril's
+            # flag for the math, so attempt that construction regardless of
+            # plate_solved and only treat it as "not solved" if the header genuinely has
+            # no usable celestial WCS -- see SirilWcs.from_header_dict.
+            try:
+                self.wcs = SirilWcs.from_header_dict(header, self.image_info.width, self.image_info.height)
+            except NotPlateSolvedError:
                 QMessageBox.warning(
                     self, "Not Plate Solved",
                     "The loaded image has no astrometric solution. Plate solve it in "
                     "Siril first, then relaunch Siril Modern Annotator.",
                 )
                 return
-            header = self.bridge.get_wcs_header_dict()
-            self.wcs = SirilWcs.from_header_dict(header, self.image_info.width, self.image_info.height)
+            if not self.image_info.plate_solved:
+                QMessageBox.information(
+                    self, "Unverified Astrometric Solution",
+                    "Siril did not mark this image as plate solved, but its FITS header "
+                    "already contains a usable astrometric solution, so it's being used "
+                    "anyway. Object positions may be less reliable than a solution "
+                    "verified by Siril itself.",
+                )
             self.arcsec_per_px = self.wcs.pixel_scale_arcsec_per_px()
             self.icc_profile = self.bridge.get_image_icc_profile()
             # Label font sizes only -- enabled/color/etc. keep their dataclass defaults
