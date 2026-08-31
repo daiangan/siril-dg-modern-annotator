@@ -106,7 +106,14 @@ class MarkerItem(QGraphicsObject):
         # used for mouse press/release.
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        # Deliberately NOT ItemIsSelectable: the app tracks "selected" itself
+        # (selected_ above, driven by main_window.select_annotation), never reads Qt's
+        # own isSelected(). Setting this flag left a plain click marking the item
+        # QGraphicsItem-selected as an unrelated framework side effect, and Qt's default
+        # mouseMoveEvent drags every selected+movable item together -- so dragging the
+        # compass or info box (both ItemIsMovable, see overlay_item.py) was also
+        # dragging whichever marker/label had most recently been clicked. Confirmed
+        # real report.
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -271,8 +278,20 @@ class MarkerItem(QGraphicsObject):
 
     def mousePressEvent(self, event):
         self.clicked.emit()
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        super().mousePressEvent(event)
+        # Only the left button starts a drag -- Qt's default QGraphicsItem
+        # press/move handling doesn't discriminate by button when ItemIsMovable is
+        # set, so calling super() unconditionally let a right-click (which reaches
+        # here too, for contextMenuEvent -- see setAcceptedMouseButtons above) be
+        # treated as a real drag start. Combined with the view's ScrollHandDrag +
+        # AnchorUnderMouse zoom anchor (image_view.py), a right-click carrying even a
+        # hair of trackpad jitter could visibly shift/rescale the view. Real user
+        # report: "right click ... the image gets small [and I need to hit Fit
+        # again]." event.accept() still lets contextMenuEvent fire normally.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            super().mousePressEvent(event)
+        else:
+            event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:
         self.double_clicked.emit()
@@ -284,9 +303,12 @@ class MarkerItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        super().mouseReleaseEvent(event)
-        pos = self.pos()
-        self.moved.emit(pos.x(), pos.y())
+        if event.button() == Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            pos = self.pos()
+            self.moved.emit(pos.x(), pos.y())
+        else:
+            event.accept()
 
     def set_selected_visual(self, selected: bool) -> None:
         self.selected_ = selected
@@ -313,7 +335,7 @@ class LabelItem(QGraphicsObject):
         self.catalog_colors = catalog_colors
         self.selected_ = False
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        # Deliberately NOT ItemIsSelectable -- see the matching comment on MarkerItem.
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -394,8 +416,12 @@ class LabelItem(QGraphicsObject):
 
     def mousePressEvent(self, event):
         self.clicked.emit()
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        super().mousePressEvent(event)
+        # See the matching comment on MarkerItem.mousePressEvent.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            super().mousePressEvent(event)
+        else:
+            event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:
         self.double_clicked.emit()
@@ -407,9 +433,12 @@ class LabelItem(QGraphicsObject):
 
     def mouseReleaseEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        super().mouseReleaseEvent(event)
-        pos = self.pos()
-        self.moved.emit(pos.x(), pos.y())
+        if event.button() == Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            pos = self.pos()
+            self.moved.emit(pos.x(), pos.y())
+        else:
+            event.accept()
 
     def set_selected_visual(self, selected: bool) -> None:
         self.selected_ = selected

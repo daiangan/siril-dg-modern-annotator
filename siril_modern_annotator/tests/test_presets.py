@@ -90,6 +90,41 @@ def test_all_presets_merges_builtin_and_user_but_builtin_is_never_deletable_via_
     assert "Minimal Modern" in preset_store.all_presets()
 
 
+def test_grid_line_width_at_reference_dimension_equals_the_floor():
+    # 1250 = _GRID_LINE_WIDTH_MIN_PX / _OVERLAY_LINE_WIDTH_FRACTION -- the breakeven
+    # point below which the scaled value would undercut the floor.
+    overlay = preset_store.default_overlay_settings_for_image(1250, 900)
+    assert overlay.grid.line_width == 1.0
+
+
+def test_larger_image_scales_grid_line_width_proportionally():
+    overlay = preset_store.default_overlay_settings_for_image(3000, 2500)  # short edge = 2x the breakeven
+    assert overlay.grid.line_width == 2.0
+
+
+def test_smaller_image_never_shrinks_grid_line_width_below_the_floor():
+    overlay = preset_store.default_overlay_settings_for_image(400, 300)
+    assert overlay.grid.line_width == 1.0
+
+
+def test_compass_line_width_at_reference_dimension_equals_the_floor():
+    # 2000 = _COMPASS_LINE_WIDTH_MIN_PX / _OVERLAY_LINE_WIDTH_FRACTION, which happens to
+    # match _REFERENCE_LONG_EDGE_PX above -- coincidence of the chosen constants, not a
+    # dependency between the two.
+    overlay = preset_store.default_overlay_settings_for_image(2000, 1600)
+    assert overlay.compass.line_width == 1.6
+
+
+def test_larger_image_scales_compass_line_width_proportionally():
+    overlay = preset_store.default_overlay_settings_for_image(4000, 5000)  # short edge = 2x the breakeven
+    assert overlay.compass.line_width == 3.2
+
+
+def test_smaller_image_never_shrinks_compass_line_width_below_the_floor():
+    overlay = preset_store.default_overlay_settings_for_image(400, 300)
+    assert overlay.compass.line_width == 1.6
+
+
 def test_only_minimal_modern_ships_as_a_builtin_preset():
     """Regression test: the app used to ship five built-in presets (Scientific,
     Outreach, Social Media, Print in addition to Minimal Modern), but switching to one

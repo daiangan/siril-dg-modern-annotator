@@ -9,6 +9,7 @@ point), and it only ever does so on the main thread.
 from __future__ import annotations
 
 import logging
+from dataclasses import fields as dataclass_fields
 from dataclasses import replace
 from pathlib import Path
 
@@ -42,7 +43,14 @@ from ..annotation.catalogs import (
     VizierProvider,
 )
 from ..annotation.layout import auto_arrange
-from ..annotation.models import Annotation, MarkerShape, MarkerStyle, OverlaySettings, StylePreset
+from ..annotation.models import (
+    Annotation,
+    MarkerShape,
+    MarkerStyle,
+    OverlaySettings,
+    StylePreset,
+    default_priority_for_catalog,
+)
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
     compute_compass_geometry,
@@ -60,8 +68,10 @@ from ..siril_bridge.interface import ImageInfo, NoImageLoadedError, SirilBridge,
 from .annotation_item import ConnectorItem, LabelItem, MarkerItem, qt_text_measurer
 from .overlay_item import CompassItem, GridItem, InfoBoxItem
 from .commands import (
+    AddAnnotationCommand,
     AnnotationFieldsCommand,
     AutoArrangeCommand,
+    DeleteAnnotationCommand,
     GlobalStyleChangeCommand,
     MoveCompassCommand,
     MoveInfoBoxCommand,
@@ -150,6 +160,15 @@ class MainWindow(QMainWindow):
         self.marker_items: dict[str, MarkerItem] = {}
         self.label_items: dict[str, LabelItem] = {}
         self.connector_items: dict[str, ConnectorItem] = {}
+        # Items just removed from the scene (see _remove_scene_items_for), kept alive
+        # here briefly rather than dropped immediately. QGraphicsScene.removeItem()
+        # detaches an item, but its own internal index/paint bookkeeping isn't always
+        # fully settled by the time it returns -- a later repaint (even one nested
+        # inside a completely unrelated menu's own exec() loop) can still touch a
+        # just-removed item. If Python has already destroyed the underlying C++
+        # object by then, that's a real, confirmed use-after-free crash (native
+        # SIGABRT/SIGSEGV) -- see _flush_pending_item_cleanup.
+        self._pending_item_cleanup: list[object] = []
         self.selected_id: str | None = None
 
         # Grid/compass/info box: off by default every session (per user request) --
@@ -180,6 +199,12 @@ class MainWindow(QMainWindow):
         self.image_view.zoom_changed.connect(self._on_zoom_changed)
         self.image_view.cursor_native_pos.connect(self._on_cursor_moved)
         self.image_view.background_clicked.connect(self._on_background_clicked)
+        # Deferred, same reasoning as the marker/label context_menu_requested wiring in
+        # _add_scene_items_for -- background_context_menu_requested is emitted
+        # synchronously from inside ImageView's own contextMenuEvent C++ frame.
+        self.image_view.background_context_menu_requested.connect(
+            lambda x, y, pos: QTimer.singleShot(0, lambda: self._show_add_custom_object_menu(x, y, pos))
+        )
 
         self.object_panel = ObjectPanel()
         self.object_panel.selection_changed.connect(self.select_annotation)
@@ -582,11 +607,15 @@ class MainWindow(QMainWindow):
         if not removed_ids:
             return
         self.annotations = [a for a in self.annotations if a.id not in removed_ids]
+        removed_items = []
         for annotation_id in removed_ids:
             for d in (self.marker_items, self.label_items, self.connector_items):
                 item = d.pop(annotation_id, None)
                 if item is not None and item.scene() is not None:
+                    item.setVisible(False)
                     item.scene().removeItem(item)
+                    removed_items.append(item)
+        self._defer_item_cleanup(removed_items)
         if self.selected_id in removed_ids:
             self.selected_id = None
             self.style_panel.set_selected_annotation(None)
@@ -753,8 +782,31 @@ class MainWindow(QMainWindow):
         label.clicked.connect(lambda a=ann: self.select_annotation(a.id))
         marker.moved.connect(lambda x, y, a=ann: self._on_marker_moved(a, x, y))
         label.moved.connect(lambda x, y, a=ann: self._on_label_moved(a, x, y))
-        marker.context_menu_requested.connect(lambda pos, a=ann: self._show_object_context_menu(a, pos))
-        label.context_menu_requested.connect(lambda pos, a=ann: self._show_object_context_menu(a, pos))
+        # Deferred (not called directly from the signal handler): context_menu_requested
+        # is emitted synchronously from *inside* MarkerItem/LabelItem's own
+        # contextMenuEvent, i.e. while that item's own C++ virtual-method call frame is
+        # still live on the stack. _show_object_context_menu's menu.exec() nested loop
+        # can itself trigger Delete, which destroys this exact item -- if that whole
+        # chain runs synchronously here, the item gets destroyed while its own
+        # contextMenuEvent frame is still above it on the stack, and unwinding that
+        # frame afterward calls a virtual method on an already-destroyed C++ object
+        # (confirmed real crash: SIGABRT / "Pure virtual function called!"). A prior
+        # fix that deferred only the Delete action itself (via QTimer.singleShot from
+        # inside the menu's own triggered handler) did NOT resolve this: Qt's
+        # zero-delay timers are serviced by whatever event loop is current when they
+        # fire, including menu.exec()'s own still-active nested one, so a delete
+        # deferred that way could still run before contextMenuEvent had returned.
+        # Deferring the *entire* menu call here instead guarantees contextMenuEvent has
+        # already fully returned (this item's frame is off the stack) before
+        # menu.exec() -- and anything it triggers -- ever begins; destroying the item
+        # from inside a Qt nested loop that has nothing to do with the item's own
+        # event handling is completely normal and safe.
+        marker.context_menu_requested.connect(
+            lambda pos, a=ann: QTimer.singleShot(0, lambda: self._show_object_context_menu(a, pos))
+        )
+        label.context_menu_requested.connect(
+            lambda pos, a=ann: QTimer.singleShot(0, lambda: self._show_object_context_menu(a, pos))
+        )
         marker.double_clicked.connect(lambda a=ann: self._on_object_double_clicked(a.id))
         label.double_clicked.connect(lambda a=ann: self._on_object_double_clicked(a.id))
         self.image_view.scene_.addItem(connector)
@@ -766,6 +818,46 @@ class MainWindow(QMainWindow):
         self.label_items[ann.id] = label
         self.connector_items[ann.id] = connector
         self._update_connector(ann)
+
+    def _remove_scene_items_for(self, ann: Annotation) -> None:
+        """Inverse of _add_scene_items_for, for one annotation -- used by
+        AddAnnotationCommand.undo() and DeleteAnnotationCommand.redo(). Mirrors the
+        item-popping loop _remove_catalog_objects already does inline for a whole
+        catalog at once; pulled out as its own method here since these commands only
+        ever operate on a single annotation."""
+        removed = []
+        for d in (self.marker_items, self.label_items, self.connector_items):
+            item = d.pop(ann.id, None)
+            if item is not None and item.scene() is not None:
+                item.setVisible(False)
+                item.scene().removeItem(item)
+                removed.append(item)
+        self._defer_item_cleanup(removed)
+
+    def _defer_item_cleanup(self, items: list) -> None:
+        """Keeps just-removed scene items alive for a short delay instead of letting
+        Python's refcounting destroy their underlying C++ objects the instant this
+        function returns. Confirmed real, reproducible crash otherwise (two separate
+        native crash reports: SIGABRT "Pure virtual function called!" in
+        QGraphicsItemPrivate::effectiveBoundingRect, and a SIGSEGV/pointer-
+        authentication use-after-free in QGraphicsItem::topLevelItem -- both inside
+        QGraphicsView::paintEvent's item traversal). QGraphicsScene.removeItem()
+        detaches an item, but the scene's own internal index/paint bookkeeping isn't
+        necessarily fully settled the instant it returns; a *later* repaint --
+        including one nested inside a completely unrelated menu's own exec() loop,
+        e.g. right-clicking empty space shortly after a delete -- can still touch a
+        just-removed item. If the C++ object is already gone by then, that's a
+        use-after-free. Holding a Python reference a little longer, released only
+        after a short delay (giving Qt's event loop several iterations to fully
+        process any pending paint/index cleanup first), is the standard mitigation
+        for this known class of PyQt/PySide issue."""
+        if not items:
+            return
+        self._pending_item_cleanup.extend(items)
+        QTimer.singleShot(250, self._flush_pending_item_cleanup)
+
+    def _flush_pending_item_cleanup(self) -> None:
+        self._pending_item_cleanup.clear()
 
     def _update_connector(self, ann: Annotation) -> None:
         connector = self.connector_items.get(ann.id)
@@ -866,6 +958,111 @@ class MainWindow(QMainWindow):
     def _on_background_clicked(self) -> None:
         self.select_annotation(None)
 
+    def _show_add_custom_object_menu(self, x: float, y: float, screen_pos) -> None:
+        # Nothing to place a custom object relative to before an image (and its WCS
+        # solution) is actually loaded -- silently do nothing rather than show a menu
+        # whose one action would just fail.
+        if self.wcs is None or self.image_info is None:
+            return
+        menu = QMenu(self)
+        add_action = menu.addAction("Add Custom Object")
+        # Acting on exec()'s return value, not add_action.triggered -- see
+        # _show_object_context_menu's comment for the full reasoning (same fix).
+        if menu.exec(screen_pos) is add_action:
+            self._add_custom_object(x, y)
+
+    def _add_custom_object(self, x: float, y: float) -> None:
+        # ra/dec (not just image_x/image_y) are needed even for a manually-placed
+        # object -- the RA/Dec grid, the info box, and the Objects panel's RA/Dec
+        # display all read straight off the annotation, same as any catalog object
+        # (ARCHITECTURE.md #4's "ra/dec are the permanent source of truth").
+        ra, dec = self.wcs.pixel_to_world(x, y)
+        # A custom object has no catalog angular_size, so it never benefits from
+        # compute_marker_geometry's angular-size-based upscaling (renderer.py) the way
+        # a real galaxy/nebula often does -- rendered at the flat global radius alone,
+        # it read as noticeably tinier than its catalog neighbors. Per user report,
+        # give it its own per-object override at 1.6x the current global radius so it
+        # stands out as a deliberately-placed point regardless of image resolution or
+        # whatever preset is active (both already baked into the global radius it's
+        # scaling from).
+        base_marker = self.global_style_holder[0].marker_style
+        custom_marker_style = replace(
+            base_marker,
+            radius=base_marker.radius * 1.6,
+            radius_x=base_marker.radius_x * 1.6,
+            radius_y=base_marker.radius_y * 1.6,
+        )
+        ann = Annotation(
+            catalog="user",
+            catalog_name="Custom Object",
+            ra=ra,
+            dec=dec,
+            image_x=x,
+            image_y=y,
+            object_type="custom",
+            priority=default_priority_for_catalog("user"),
+            marker_style=custom_marker_style,
+        )
+        cmd = AddAnnotationCommand(
+            ann, self.annotations, self._add_scene_items_for, self._remove_scene_items_for,
+            self._refresh_after_annotation_count_change,
+        )
+        self.undo_stack.push(cmd)
+        # Land the user directly on the rename field, text pre-selected, so typing a
+        # real name is the very next thing that happens -- reuses the exact "Custom
+        # display name" field/flow every other object already renames through (see
+        # StylePanel.set_selected_annotation), rather than a bespoke "name this
+        # object" dialog. Mirrors _on_object_double_clicked's tab-switching.
+        self.select_annotation(ann.id)
+        self.dock_tabs.setCurrentWidget(self.style_panel)
+        self.style_panel.show_object_tab()
+        self.style_panel.custom_name_edit.setFocus()
+        self.style_panel.custom_name_edit.selectAll()
+
+    def _delete_annotation(self, annotation_id: str) -> None:
+        # Offered only for catalog == "user" objects -- see DeleteAnnotationCommand's
+        # own docstring for why catalog objects get Hide instead.
+        ann = self._find_annotation(annotation_id)
+        if ann is None:
+            return
+        cmd = DeleteAnnotationCommand(
+            ann, self.annotations, self._add_scene_items_for, self._remove_scene_items_for,
+            self._refresh_after_annotation_count_change,
+        )
+        self.undo_stack.push(cmd)
+
+    def _refresh_after_annotation_count_change(self) -> None:
+        """Refresh callback for AddAnnotationCommand/DeleteAnnotationCommand -- unlike
+        every other command's refresh (_refresh_all / _refresh_annotation), the set of
+        rows itself changed, not just a field on an existing one, so the Objects panel
+        needs a real set_annotations() (model reset -> new/removed row) rather than
+        refresh() (repaints existing rows in place, brief/blind to added or removed
+        ones). Must also work correctly when invoked directly by the undo stack
+        (Ctrl+Z/Ctrl+Shift+Z), not just via _add_custom_object/_delete_annotation --
+        hence clearing selected_id here rather than relying on the caller to notice a
+        delete removed the selected object.
+
+        set_annotations() MUST run first, before anything else below touches the
+        table/model (clear_selection(), _refresh_all()'s object_panel.refresh() call).
+        object_panel.model._annotations is the *same list object* as self.annotations
+        (aliased, not copied -- see ObjectPanel.set_annotations), so
+        DeleteAnnotationCommand's plain self.annotations.remove(...) already shrank it
+        by the time this runs, with the QTableView never told the row count changed
+        (only set_annotations()'s beginResetModel()/endResetModel() does that). Touch
+        the view in any other way first and it still believes the old, larger row
+        count, and can ask AnnotationTableModel.data() for a now out-of-range row --
+        an unguarded self._annotations[row] there raises IndexError from inside an
+        overridden Qt virtual method. Confirmed real crash (SIGABRT / "Pure virtual
+        function called!") deleting a custom object."""
+        self.object_panel.set_annotations(self.annotations)
+        if self.selected_id is not None and self._find_annotation(self.selected_id) is None:
+            self.selected_id = None
+            self.style_panel.set_selected_annotation(None)
+            self.object_panel.clear_selection()
+            self.selection_label.setText("")
+        self._refresh_all()
+        self.connection_label.setText(f"{len(self.annotations)} objects — {self.source_identifier}")
+
     def _set_item_selected(self, annotation_id: str, selected: bool) -> None:
         marker = self.marker_items.get(annotation_id)
         label = self.label_items.get(annotation_id)
@@ -961,14 +1158,40 @@ class MainWindow(QMainWindow):
         name = ann.display_name(self.global_style_holder[0].label_style.name_display)
         menu = QMenu(self)
         hide_action = menu.addAction(f"Hide {name}")
-        hide_action.triggered.connect(lambda: self._on_table_visibility_changed(ann.id, False))
         # Only offered once the marker has actually been dragged off its WCS position --
         # same condition as the Selected Object tab's Reset Position button (brief:
         # give it a right-click entry there too, not just the Style panel button).
-        if ann.marker_x is not None:
-            reset_position_action = menu.addAction("Reset Position")
-            reset_position_action.triggered.connect(self._reset_selected_marker_position)
-        menu.exec(screen_pos)
+        reset_position_action = menu.addAction("Reset Position") if ann.marker_x is not None else None
+        # Delete is only offered for a manually-placed custom object (catalog ==
+        # "user") -- a catalog object has no equivalent "undo its existence" action,
+        # Hide above is the correct (and only) way to remove it from view. See
+        # DeleteAnnotationCommand's docstring.
+        delete_action = menu.addAction(f"Delete {name}") if ann.catalog == "user" else None
+        # Acting on menu.exec()'s *return value* here, after it returns, rather than
+        # on each action's triggered signal (which fires *during* exec()'s own still-
+        # active nested event loop) -- real crash report (a full macOS crash log, not
+        # just the Siril console line) showed the abort happening inside a totally
+        # unrelated *later* QGraphicsView repaint (SIGABRT in
+        # QGraphicsItemPrivate::effectiveBoundingRect, reached via an async posted
+        # paint event, no Python frames anywhere on that stack), meaning the scene's
+        # own internal item index still held a stale reference to the destroyed marker
+        # by the time it repainted -- a known class of Qt/PyQt issue when an item is
+        # destroyed while still nested inside a QMenu's own exec() loop. Deferring the
+        # *entire menu call* (see _add_scene_items_for's context_menu_requested wiring)
+        # fixed one layer of reentrancy (contextMenuEvent's own frame) but not this
+        # one, since exec() below still opens its own nested loop regardless. Waiting
+        # for exec() to fully return before acting matches exactly how
+        # _remove_catalog_objects (a plain toolbar checkbox slot, never nested, never
+        # crashed) already destroys items safely.
+        chosen = menu.exec(screen_pos)
+        if chosen is None:
+            return
+        if chosen is hide_action:
+            self._on_table_visibility_changed(ann.id, False)
+        elif chosen is reset_position_action:
+            self._reset_selected_marker_position()
+        elif chosen is delete_action:
+            self._delete_annotation(ann.id)
 
     def _on_object_double_clicked(self, annotation_id: str) -> None:
         # Per user request: double-clicking an object on the canvas should land the
@@ -1022,6 +1245,28 @@ class MainWindow(QMainWindow):
         self.undo_stack.push(cmd)
         self._has_saved_style = True
         last_used_store.save_last_used_style(new_style)
+
+        # Grid/compass line width and label size are resolution-scaled defaults (see
+        # default_overlay_settings_for_image), same reasoning as marker radius/font size
+        # above -- "Reset to Default" needs to restore those too, not just marker/label
+        # style, or a grid/compass line manually thinned out (or left at an old flat
+        # default from before that scaling existed) would survive a reset. `enabled` and
+        # the compass's drag position are placement/visibility, not style, so both are
+        # preserved rather than reset.
+        fresh_overlays = preset_store.default_overlay_settings_for_image(
+            self.image_info.width, self.image_info.height,
+        )
+        self._apply_overlay_style_fields(self.overlay_settings.grid, fresh_overlays.grid, preserve={"enabled"})
+        self._apply_overlay_style_fields(
+            self.overlay_settings.compass, fresh_overlays.compass, preserve={"enabled", "anchor_x", "anchor_y"},
+        )
+        self._refresh_overlays()
+
+    @staticmethod
+    def _apply_overlay_style_fields(target: object, fresh: object, *, preserve: set[str]) -> None:
+        for f in dataclass_fields(target):
+            if f.name not in preserve:
+                setattr(target, f.name, getattr(fresh, f.name))
 
     def _on_object_style_edited(self, annotation_id: str) -> None:
         ann = self._find_annotation(annotation_id)

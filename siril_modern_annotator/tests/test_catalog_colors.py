@@ -26,7 +26,14 @@ def _ann(catalog: str, marker_style=None, label_style=None) -> Annotation:
 
 
 def test_default_catalog_colors_cover_every_supported_catalog():
-    assert set(DEFAULT_CATALOG_COLORS.keys()) == set(SUPPORTED_CATALOGS.keys())
+    # DEFAULT_CATALOG_COLORS is a superset, not an exact match, of SUPPORTED_CATALOGS:
+    # every *queryable* catalog needs a color (that's what this test guards), but
+    # DEFAULT_CATALOG_COLORS also carries "user" -- the color a manually-placed custom
+    # object renders with -- which is deliberately absent from SUPPORTED_CATALOGS
+    # (that dict drives the Catalogs toolbar's fetch-toggle menu; "user" objects are
+    # never fetched, so a checkbox for it would do nothing).
+    assert set(SUPPORTED_CATALOGS.keys()) <= set(DEFAULT_CATALOG_COLORS.keys())
+    assert set(DEFAULT_CATALOG_COLORS.keys()) - set(SUPPORTED_CATALOGS.keys()) == {"user"}
 
 
 def test_default_catalog_colors_are_valid_distinct_hex_and_pastel():

@@ -196,6 +196,72 @@ class AnnotationFieldsCommand(QUndoCommand):
         self.refresh()
 
 
+class AddAnnotationCommand(QUndoCommand):
+    """Adds a brand-new Annotation (currently only ever a user-placed custom object,
+    catalog == "user") to the live annotation list and its scene items. Delegates
+    scene-item creation/removal to callbacks (MainWindow._add_scene_items_for /
+    _remove_scene_items_for) so this module stays free of QGraphicsScene/MarkerItem
+    knowledge, same as every other command here."""
+
+    def __init__(
+        self,
+        annotation: Annotation,
+        annotations: list[Annotation],
+        add_to_scene: Callable[[Annotation], None],
+        remove_from_scene: Callable[[Annotation], None],
+        refresh: Callable[[], None],
+    ):
+        super().__init__(f"Add {annotation.catalog_name}")
+        self.annotation = annotation
+        self.annotations = annotations
+        self.add_to_scene = add_to_scene
+        self.remove_from_scene = remove_from_scene
+        self.refresh = refresh
+
+    def redo(self) -> None:
+        self.annotations.append(self.annotation)
+        self.add_to_scene(self.annotation)
+        self.refresh()
+
+    def undo(self) -> None:
+        self.remove_from_scene(self.annotation)
+        self.annotations.remove(self.annotation)
+        self.refresh()
+
+
+class DeleteAnnotationCommand(QUndoCommand):
+    """Mirrors AddAnnotationCommand in reverse. Only ever offered for catalog == "user"
+    objects (see MainWindow._show_object_context_menu) -- a catalog object should be
+    Hidden, not deleted, to keep the app's catalog-vs-manual data model honest; a
+    custom object has no catalog backing it, so Hide-forever would just be permanent
+    clutter with no real value."""
+
+    def __init__(
+        self,
+        annotation: Annotation,
+        annotations: list[Annotation],
+        add_to_scene: Callable[[Annotation], None],
+        remove_from_scene: Callable[[Annotation], None],
+        refresh: Callable[[], None],
+    ):
+        super().__init__(f"Delete {annotation.catalog_name}")
+        self.annotation = annotation
+        self.annotations = annotations
+        self.add_to_scene = add_to_scene
+        self.remove_from_scene = remove_from_scene
+        self.refresh = refresh
+
+    def redo(self) -> None:
+        self.remove_from_scene(self.annotation)
+        self.annotations.remove(self.annotation)
+        self.refresh()
+
+    def undo(self) -> None:
+        self.annotations.append(self.annotation)
+        self.add_to_scene(self.annotation)
+        self.refresh()
+
+
 class AutoArrangeCommand(QUndoCommand):
     """Snapshots every movable annotation's label position/manual flag before Auto
     Arrange runs, so the whole batch undoes in one step."""

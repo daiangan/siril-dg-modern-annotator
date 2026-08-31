@@ -421,6 +421,19 @@ class StylePanel(QWidget):
         self.custom_name_edit.setPlaceholderText("Leave blank to use the catalog/common name")
         self.priority_spin = DarkSpinBox()
         self.priority_spin.setRange(0, 100)
+        # Counter-intuitive direction (lower number = more important, like process
+        # "niceness"), and only affects one thing (Auto Arrange's placement order) --
+        # per user discussion, worth spelling out on hover rather than hiding the
+        # control entirely, since it's the only way to keep a specific object's label
+        # clean in a crowded field without hand-placing every label.
+        priority_tooltip = (
+            "Order Auto Arrange places labels in -- lower numbers go first and get the "
+            "best free spot; higher numbers may get pushed aside if space is tight.\n"
+            "Defaults to a value based on the object's catalog (Messier lower/more "
+            "important than a faint LDN nebula, for example). Lower it to keep this "
+            "object's label clean in a crowded field."
+        )
+        self.priority_spin.setToolTip(priority_tooltip)
         self.locked_check = QCheckBox("Locked (excluded from Auto Arrange)")
         self.use_global_check = QCheckBox("Use global style for this object")
         object_tab_layout.addWidget(self.object_placeholder)
@@ -428,6 +441,7 @@ class StylePanel(QWidget):
         object_tab_layout.addWidget(self.custom_name_edit)
         priority_row = QHBoxLayout()
         self.priority_label = QLabel("Priority")
+        self.priority_label.setToolTip(priority_tooltip)
         priority_row.addWidget(self.priority_label)
         priority_row.addWidget(self.priority_spin)
         object_tab_layout.addLayout(priority_row)
@@ -456,6 +470,14 @@ class StylePanel(QWidget):
             btn.color_changed.connect(lambda hex_color, k=key: self.catalog_color_changed.emit(k, hex_color))
             catalog_colors_layout.addRow(label, btn)
             self.catalog_color_buttons[key] = btn
+        # Not driven by SUPPORTED_CATALOGS (deliberately -- see that dict's own
+        # comment: it's scoped to catalogs the app can actually *query*, and "user"
+        # isn't one). Added as its own row so a manually-placed custom object still
+        # gets a color swatch here like every other catalog.
+        user_btn = ColorButton(DEFAULT_CATALOG_COLORS.get("user", "#ffffff"))
+        user_btn.color_changed.connect(lambda hex_color: self.catalog_color_changed.emit("user", hex_color))
+        catalog_colors_layout.addRow("Custom Objects", user_btn)
+        self.catalog_color_buttons["user"] = user_btn
 
         # RA/Dec grid + compass style customization -- on/off itself lives on the
         # toolbar's "Overlays" menu (mirrors Catalogs: that button toggles visibility,
@@ -470,8 +492,13 @@ class StylePanel(QWidget):
         self.grid_opacity = DarkDoubleSpinBox()
         self.grid_opacity.setRange(0.05, 1.0)
         self.grid_opacity.setSingleStep(0.05)
+        # Range tops out well above what a flat default ever needed -- per user
+        # request, the default is now resolution-scaled (see persistence/presets.py's
+        # default_overlay_settings_for_image) and can legitimately land north of 5px
+        # on a large image; the old 5.0 cap was silently clamping that default on
+        # anything above roughly a 7500px short edge.
         self.grid_line_width = DarkDoubleSpinBox()
-        self.grid_line_width.setRange(0.2, 5.0)
+        self.grid_line_width.setRange(0.2, 40.0)
         self.grid_line_width.setSingleStep(0.2)
         self.grid_show_labels = QCheckBox("Show coordinate labels")
         self.grid_show_labels.setChecked(True)
@@ -498,8 +525,9 @@ class StylePanel(QWidget):
         compass_group = QGroupBox("Compass")
         compass_form = QFormLayout(compass_group)
         self.compass_color = ColorButton("#88CCFF")
+        # Same reasoning/cap as grid_line_width above.
         self.compass_line_width = DarkDoubleSpinBox()
-        self.compass_line_width.setRange(0.2, 5.0)
+        self.compass_line_width.setRange(0.2, 40.0)
         self.compass_line_width.setSingleStep(0.2)
         self.compass_arrow_size = DarkDoubleSpinBox()
         self.compass_arrow_size.setRange(0.02, 0.2)

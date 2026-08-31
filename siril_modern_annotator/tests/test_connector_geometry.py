@@ -84,6 +84,48 @@ def test_line_box_entry_point_lands_on_an_edge_not_a_corner_for_diagonal_offset(
     assert abs(cross) < 1e-6
 
 
+def test_unplaced_label_default_offset_scales_with_marker_radius():
+    """Regression test: compute_label_geometry's fallback for a never-arranged label
+    (label_x/label_y both None -- e.g. a custom object, which never goes through
+    auto_arrange at all, see main_window.py's _add_custom_object) used to be a flat
+    +14px offset regardless of marker size. Custom objects render at 1.6x the normal
+    marker radius, so that flat offset landed the label overlapping the (now bigger)
+    marker -- confirmed by a real screenshot. The offset must grow with the marker's
+    own radius, same _LABEL_GAP_MIN_PX/_LABEL_GAP_RADIUS_FRACTION formula
+    annotation/layout.py's auto_arrange uses."""
+    small_style = StylePreset(name="test")
+    small_style.marker_style.radius = 18.0
+    small_ann = Annotation(
+        catalog="user", catalog_name="Custom Object", ra=0.0, dec=0.0,
+        image_x=1000.0, image_y=1000.0,
+    )
+    small_label = compute_label_geometry(small_ann, small_style)
+
+    big_style = StylePreset(name="test")
+    big_style.marker_style.radius = 18.0 * 1.6  # matches _add_custom_object's 1.6x bump
+    big_ann = Annotation(
+        catalog="user", catalog_name="Custom Object", ra=0.0, dec=0.0,
+        image_x=1000.0, image_y=1000.0,
+    )
+    big_label = compute_label_geometry(big_ann, big_style)
+
+    # A bigger marker must push the label further right, and clear of its own radius.
+    assert big_label.bbox.x0 > small_label.bbox.x0
+    assert big_label.bbox.x0 - 1000.0 > big_style.marker_style.radius
+
+
+def test_unplaced_label_default_offset_has_a_floor_for_tiny_markers():
+    style = StylePreset(name="test")
+    style.marker_style.radius = 2.0  # tiny -- radius * 0.12 is well under the floor
+    ann = Annotation(
+        catalog="user", catalog_name="Custom Object", ra=0.0, dec=0.0,
+        image_x=1000.0, image_y=1000.0,
+    )
+    label = compute_label_geometry(ann, style)
+    gap = label.bbox.x0 - 1000.0 - style.marker_style.radius
+    assert gap == pytest.approx(28.0)  # _LABEL_GAP_MIN_PX
+
+
 def test_connector_edge_point_visually_aims_at_label_center_for_diagonal_offset():
     """Same scenario end-to-end through compute_connector_points: a marker diagonally
     offset from its label must produce a line aimed at the label's center, not a corner."""

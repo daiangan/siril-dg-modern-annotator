@@ -156,14 +156,23 @@ class CompassItem(QGraphicsObject):
         painter.drawText(QPointF(ex, ey), "E")
 
     def mousePressEvent(self, event):
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        super().mousePressEvent(event)
+        # Only the left button starts a drag -- see annotation_item.py's
+        # MarkerItem.mousePressEvent for the full explanation (same bug, same fix,
+        # this item is ItemIsMovable + accepts RightButton too).
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            super().mousePressEvent(event)
+        else:
+            event.accept()
 
     def mouseReleaseEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        super().mouseReleaseEvent(event)
-        pos = self.pos()
-        self.moved.emit(pos.x(), pos.y())
+        if event.button() == Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            pos = self.pos()
+            self.moved.emit(pos.x(), pos.y())
+        else:
+            event.accept()
 
     def contextMenuEvent(self, event) -> None:
         self.context_menu_requested.emit(event.screenPos())
@@ -236,14 +245,21 @@ class InfoBoxItem(QGraphicsObject):
         )
 
     def mousePressEvent(self, event):
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        super().mousePressEvent(event)
+        # See CompassItem.mousePressEvent -- same bug, same fix.
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            super().mousePressEvent(event)
+        else:
+            event.accept()
 
     def mouseReleaseEvent(self, event):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        super().mouseReleaseEvent(event)
-        pos = self.pos()
-        self.moved.emit(pos.x(), pos.y())
+        if event.button() == Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            pos = self.pos()
+            self.moved.emit(pos.x(), pos.y())
+        else:
+            event.accept()
 
     def contextMenuEvent(self, event) -> None:
         self.context_menu_requested.emit(event.screenPos())

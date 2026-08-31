@@ -74,6 +74,11 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "ldn": "#8FA9D6",  # soft slate blue
     "sh2": "#F2938C",  # soft coral
     "bright_star": "#F5E6A3",  # pale warm yellow
+    # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
+    # see that dict's own comment), just the color user-placed custom objects render
+    # with by default. Per user request: plain white, so a custom marker reads as
+    # clearly distinct from every pastel catalog color at a glance.
+    "user": "#FFFFFF",
 }
 
 # Field-of-view margin (as a fraction of FOV) used when querying, so labels for objects

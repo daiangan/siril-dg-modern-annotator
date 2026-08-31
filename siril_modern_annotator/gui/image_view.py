@@ -8,7 +8,7 @@ this view to do that conversion rather than computing it themselves
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QTransform
 from PyQt6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
@@ -21,6 +21,11 @@ class ImageView(QGraphicsView):
     zoom_changed = pyqtSignal(float)
     cursor_native_pos = pyqtSignal(float, float)
     background_clicked = pyqtSignal()  # click landed on empty space / the base image, not an item
+    # Right-click on empty space / the base image, not an item -- native (x, y) pixel
+    # position of the click plus the global screen position to pop a menu at (mirrors
+    # MarkerItem/CompassItem/InfoBoxItem's own context_menu_requested signals, just
+    # sourced from the view itself since empty space has no item to emit one).
+    background_context_menu_requested = pyqtSignal(float, float, QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -81,7 +86,20 @@ class ImageView(QGraphicsView):
     # --- zoom / pan -----------------------------------------------------------------
 
     def wheelEvent(self, event):
-        factor = _ZOOM_FACTOR_BASE if event.angleDelta().y() > 0 else 1 / _ZOOM_FACTOR_BASE
+        # Two guards against a spurious/tiny wheel event being read as a deliberate
+        # zoom step -- per real user report ("right click ... the image gets small
+        # [and I need to hit Fit again]"), a trackpad's two-finger right-click tap can
+        # fire a phantom scroll (often a *burst* of these, which compounds fast since
+        # each one multiplies the scale by _ZOOM_FACTOR_BASE) alongside the actual
+        # click. 1) delta == 0 used to fall into the zoom-*out* branch (`> 0` is
+        # False), i.e. a event carrying no real scroll intent still zoomed out -- now
+        # ignored outright. 2) a genuine scroll gesture never happens with a mouse
+        # button physically held down, so any wheel event arriving while one is is
+        # necessarily spurious/gesture-noise, not intentional zoom input.
+        delta = event.angleDelta().y()
+        if delta == 0 or event.buttons() != Qt.MouseButton.NoButton:
+            return
+        factor = _ZOOM_FACTOR_BASE if delta > 0 else 1 / _ZOOM_FACTOR_BASE
         new_scale = self.transform().m11() * factor
         if new_scale < _MIN_SCALE or new_scale > _MAX_SCALE:
             return
@@ -104,6 +122,22 @@ class ImageView(QGraphicsView):
         if item is None or item is self._pixmap_item:
             self.background_clicked.emit()
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:
+        # Same "empty space or the base image, not an item" hit-test as
+        # mousePressEvent's background_clicked above. When there IS an item under the
+        # cursor (a marker/label/compass/info box), fall through to Qt's default
+        # handling, which forwards to that item's own contextMenuEvent -- this must
+        # NOT short-circuit those existing per-item menus.
+        item = self.itemAt(event.pos())
+        if item is None or item is self._pixmap_item:
+            scene_pos = self.mapToScene(event.pos())
+            self.background_context_menu_requested.emit(
+                scene_pos.x(), scene_pos.y(), self.mapToGlobal(event.pos()),
+            )
+            event.accept()
+            return
+        super().contextMenuEvent(event)
 
     def fit_to_window(self) -> None:
         if self._pixmap_item is None:

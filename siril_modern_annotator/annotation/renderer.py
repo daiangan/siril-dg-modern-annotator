@@ -16,7 +16,7 @@ from typing import Callable
 
 import numpy as np
 
-from .layout import BBox
+from .layout import _LABEL_GAP_MIN_PX, _LABEL_GAP_RADIUS_FRACTION, BBox
 from .models import (
     Annotation,
     CompassStyle,
@@ -166,8 +166,24 @@ def compute_label_geometry(
         # marker dragged before Auto Arrange had ever run once would default its label
         # next to the original WCS position instead of the marker itself (same bug
         # class fixed in annotation/layout.py's auto_arrange, confirmed by a real report).
+        #
+        # Gap scales with the marker's own style radius (same _LABEL_GAP_MIN_PX /
+        # _LABEL_GAP_RADIUS_FRACTION formula auto_arrange uses, imported from
+        # layout.py rather than duplicated) -- a flat offset here used to land the
+        # label overlapping the marker for anything bigger than the ~14px it assumed,
+        # confirmed real report against a custom object's marker (rendered at 1.6x the
+        # normal radius, see main_window.py's _add_custom_object, which -- unlike a
+        # freshly-fetched catalog object -- never goes through auto_arrange at all, so
+        # this fallback is the *only* placement it ever gets).
+        marker_style = ann.effective_marker_style(global_style)
+        marker_radius = (
+            max(marker_style.radius_x, marker_style.radius_y)
+            if marker_style.shape is MarkerShape.ELLIPSE
+            else marker_style.radius
+        )
+        gap = max(_LABEL_GAP_MIN_PX, marker_radius * _LABEL_GAP_RADIUS_FRACTION)
         marker_x, marker_y = ann.effective_marker_position()
-        x, y = marker_x + 14, marker_y - h / 2
+        x, y = marker_x + marker_radius + gap, marker_y - h / 2
     return LabelGeometry(text=text, bbox=BBox(x, y, x + w, y + h), style=style)
 
 

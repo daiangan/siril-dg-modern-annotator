@@ -71,6 +71,17 @@ class AnnotationTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
+        # Belt-and-suspenders: this is a Qt virtual method override, called directly
+        # by the view's own C++ paint/layout code with a row index *it* computed from
+        # rowCount() -- if that index is ever stale relative to the live
+        # (main_window.annotations-aliased) list underneath, an unguarded IndexError
+        # here doesn't just raise a Python traceback, it can escape into the C++ call
+        # stack mid-virtual-call and crash the process outright. Confirmed real crash
+        # (SIGABRT / "Pure virtual function called!") from exactly that ordering bug
+        # elsewhere (see MainWindow._refresh_after_annotation_count_change) -- kept
+        # here too as a safety net against any *future* such ordering mistake.
+        if index.row() >= len(self._annotations):
+            return None
         ann = self._annotations[index.row()]
         col = index.column()
         if col == 0 and role == Qt.ItemDataRole.CheckStateRole:
@@ -204,7 +215,11 @@ class ObjectPanel(QWidget):
         self.catalog_filter.clear()
         self.catalog_filter.addItem("All catalogs", None)
         for c in catalogs:
-            self.catalog_filter.addItem(c, c)
+            # Every other catalog shows its raw key here (e.g. "messier", not
+            # SUPPORTED_CATALOGS' full "Messier Catalogue (M)" label -- too long for
+            # this compact dropdown). "user" gets the one exception: "user" on its own
+            # reads as a bug, not a category, to someone who didn't write this code.
+            self.catalog_filter.addItem("Custom" if c == "user" else c, c)
         idx = self.catalog_filter.findData(current)
         self.catalog_filter.setCurrentIndex(idx if idx >= 0 else 0)
         self.catalog_filter.blockSignals(False)

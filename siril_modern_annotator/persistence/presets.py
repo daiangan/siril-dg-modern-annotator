@@ -111,9 +111,24 @@ def default_preset_for_image(width: int, height: int) -> StylePreset:
 _OVERLAY_LABEL_FRACTION = 0.015
 _OVERLAY_LABEL_MIN_PT = 14.0
 
+# Same problem as the label font size, for the grid's and compass's own line strokes:
+# line_width is native-pixel-space (GridItem.paint/CompassItem.paint draw directly in
+# scene/native coordinates), so a flat width that looks fine on a modest image becomes
+# a near-invisible hairline once the image's native resolution climbs into the tens of
+# megapixels -- per user report. Same fraction for both so they read as the same visual
+# weight; each floored at its own flat dataclass default so a small image doesn't get
+# an oversized line, and so the compass (originally 1.6px, vs. the grid's 1.0px) keeps
+# its slightly heavier look at low resolution too.
+_OVERLAY_LINE_WIDTH_FRACTION = 0.0008
+_GRID_LINE_WIDTH_MIN_PX = 1.0
+_COMPASS_LINE_WIDTH_MIN_PX = 1.6
+
 
 def default_overlay_settings_for_image(width: int, height: int) -> OverlaySettings:
     label_size = max(_OVERLAY_LABEL_MIN_PT, min(width, height) * _OVERLAY_LABEL_FRACTION)
+    short_edge = min(width, height)
+    grid_line_width = max(_GRID_LINE_WIDTH_MIN_PX, short_edge * _OVERLAY_LINE_WIDTH_FRACTION)
+    compass_line_width = max(_COMPASS_LINE_WIDTH_MIN_PX, short_edge * _OVERLAY_LINE_WIDTH_FRACTION)
     # Info box padding/border radius/margin scale with the same ratio as its font
     # size, relative to InfoBoxStyle's own flat defaults -- same reasoning as
     # label_size above (a flat size looks fine at one resolution, tiny at another),
@@ -121,8 +136,8 @@ def default_overlay_settings_for_image(width: int, height: int) -> OverlaySettin
     info_box_defaults = InfoBoxStyle()
     scale_factor = label_size / info_box_defaults.font_size
     return OverlaySettings(
-        grid=GridStyle(label_font_size=label_size),
-        compass=CompassStyle(label_font_size=label_size),
+        grid=GridStyle(label_font_size=label_size, line_width=grid_line_width),
+        compass=CompassStyle(label_font_size=label_size, line_width=compass_line_width),
         info_box=InfoBoxStyle(
             font_size=label_size,
             padding=info_box_defaults.padding * scale_factor,
