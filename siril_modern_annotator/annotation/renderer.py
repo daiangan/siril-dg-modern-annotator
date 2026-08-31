@@ -476,6 +476,10 @@ def _clip_polyline_to_frame(
 
 
 _GRID_LABEL_MARGIN_PX = 6.0
+# How close a label's near edge should sit to its grid line -- per user request,
+# noticeably closer than dead-centered-on-the-line (the previous behavior), matching
+# Siril's own look of text running right along each line.
+GRID_LABEL_LINE_GAP_PX = 2.0
 
 
 def _line_local_angle_deg(segment: list[Point], index: int) -> float:
@@ -552,6 +556,19 @@ def clamp_rotated_label_point(
     clamped_x = (lo_x + hi_x) / 2.0 if lo_x > hi_x else min(max(x, lo_x), hi_x)
     clamped_y = (lo_y + hi_y) / 2.0 if lo_y > hi_y else min(max(y, lo_y), hi_y)
     return clamped_x, clamped_y
+
+
+def grid_label_perpendicular_offset(rotation_deg: float, distance: float) -> Point:
+    """(dx, dy), perpendicular to a grid line's local direction, that nudges its label
+    from centered-on-the-line toward sitting just above/beside it instead -- per user
+    request, noticeably closer to the line than dead center (see
+    GRID_LABEL_LINE_GAP_PX). Positive distance always moves toward the same visual
+    side regardless of the line's own angle (e.g. "up" on screen for a horizontal
+    line, y-down pixel space same as everywhere else in this module) -- callers pick
+    distance so the label's near edge ends up GRID_LABEL_LINE_GAP_PX from the line,
+    not this function, which only knows the direction."""
+    theta = math.radians(rotation_deg)
+    return (distance * math.sin(theta), -distance * math.cos(theta))
 
 
 def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:

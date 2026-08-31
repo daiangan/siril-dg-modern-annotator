@@ -35,6 +35,7 @@ from ..annotation.models import (
 )
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
 from ..annotation.renderer import (
+    GRID_LABEL_LINE_GAP_PX,
     default_max_marker_radius_px,
     clamp_rotated_label_point,
     compute_compass_geometry,
@@ -43,6 +44,7 @@ from ..annotation.renderer import (
     compute_info_box_geometry,
     compute_label_geometry,
     compute_marker_geometry,
+    grid_label_perpendicular_offset,
     resolve_connector_color,
 )
 from ..annotation.wcs import SirilWcs
@@ -433,7 +435,13 @@ def _draw_grid(overlay: Image.Image, wcs: SirilWcs, style, scale: float) -> None
                 *_scaled((label.x, label.y), scale), label.rotation_deg, text_w, text_h,
                 frame_width, frame_height,
             )
-            _draw_rotated_text(overlay, (cx, cy), label.text, label.rotation_deg, font, color)
+            # Per user request: sit noticeably closer to the line than dead center --
+            # nudge toward it by however far brings the label's near edge to
+            # GRID_LABEL_LINE_GAP_PX away, using the safety margin the clamp above
+            # already reserved rather than reducing it. Mirrors GridItem.paint exactly.
+            nudge = max(0.0, text_h / 2.0 - GRID_LABEL_LINE_GAP_PX)
+            dx, dy = grid_label_perpendicular_offset(label.rotation_deg, nudge)
+            _draw_rotated_text(overlay, (cx + dx, cy + dy), label.text, label.rotation_deg, font, color)
 
 
 def _draw_compass(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) -> None:
