@@ -15,28 +15,16 @@ from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
-from ..annotation.models import CompassStyle, DecLabelPosition, GridStyle, InfoBoxStyle, RaLabelPosition
-from ..annotation.renderer import compute_compass_geometry, compute_grid_geometry, compute_info_box_geometry
+from ..annotation.models import CompassStyle, GridStyle, InfoBoxStyle
+from ..annotation.renderer import (
+    compute_compass_geometry,
+    compute_grid_geometry,
+    compute_info_box_geometry,
+    place_grid_label_point,
+)
 from ..annotation.wcs import SirilWcs
 
 _LABEL_FONT_FAMILY = "Verdana"  # ships on both macOS and Windows -- see theme_dark.qss
-
-
-def _grid_label_draw_point(label, style: GridStyle, metrics: QFontMetricsF) -> QPointF:
-    """QPainter.drawText(point, text) places point at the text's baseline-left corner
-    -- unlike Pillow's anchor= (used identically for this same label in
-    export/exporter.py's _draw_grid), Qt has no built-in anchor modes, so this computes
-    the equivalent baseline position by hand: text grows *inward* from label.(x, y)
-    (already inset from the frame edge by renderer.compute_grid_geometry) rather than
-    being centered on or overhanging past it."""
-    width = metrics.horizontalAdvance(label.text)
-    if label.axis == "ra":
-        x = label.x - width / 2.0
-        y = label.y + metrics.ascent() if style.ra_label_position is RaLabelPosition.TOP else label.y - metrics.descent()
-    else:
-        x = label.x - width if style.dec_label_position is DecLabelPosition.RIGHT else label.x
-        y = label.y + (metrics.ascent() - metrics.descent()) / 2.0
-    return QPointF(x, y)
 
 
 class GridItem(QGraphicsItem):
@@ -91,8 +79,28 @@ class GridItem(QGraphicsItem):
             font.setPointSizeF(max(1.0, style.label_font_size))
             painter.setFont(font)
             metrics = QFontMetricsF(font)
+            frame_width, frame_height = float(self.wcs.native_width), float(self.wcs.native_height)
             for label in geo.labels:
-                painter.drawText(_grid_label_draw_point(label, style, metrics), label.text)
+                # Per user report/reference screenshot: labels run along the grid line
+                # itself (rotated to match its angle), sitting close to it, like
+                # Siril's own grid overlay -- place_grid_label_point does the real,
+                # rotation-aware positioning here using this font's actual metrics
+                # (renderer.py itself has no font).
+                text_width = metrics.horizontalAdvance(label.text)
+                text_height = metrics.height()
+                cx, cy = place_grid_label_point(
+                    label.x, label.y, label.rotation_deg, text_width, text_height,
+                    frame_width, frame_height,
+                )
+                painter.save()
+                painter.translate(cx, cy)
+                painter.rotate(label.rotation_deg)
+                # drawText's point is the text's baseline-left corner; offset so the
+                # (unrotated, local) text is centered on the origin just translated to.
+                painter.drawText(
+                    QPointF(-text_width / 2.0, (metrics.ascent() - metrics.descent()) / 2.0), label.text
+                )
+                painter.restore()
 
 
 class CompassItem(QGraphicsObject):
@@ -188,6 +196,7 @@ class InfoBoxItem(QGraphicsObject):
 
     moved = pyqtSignal(float, float)
     context_menu_requested = pyqtSignal(QPoint)
+    clicked = pyqtSignal()
 
     def __init__(self, style: InfoBoxStyle, image_width: float, image_height: float, text_measurer=None):
         super().__init__()
@@ -247,6 +256,7 @@ class InfoBoxItem(QGraphicsObject):
     def mousePressEvent(self, event):
         # See CompassItem.mousePressEvent -- same bug, same fix.
         if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()  # per user request: jump straight to editing its text
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             super().mousePressEvent(event)
         else:

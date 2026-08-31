@@ -130,8 +130,10 @@ class StyleEditorWidget(QWidget):
         self.marker_stroke = DarkDoubleSpinBox()
         self.marker_stroke.setRange(0.2, 10.0)
         self.marker_stroke.setSingleStep(0.2)
-        self.marker_radius = DarkDoubleSpinBox()
-        self.marker_radius.setRange(2.0, 500.0)
+        # Slider, not a spinbox: per user request, matching Radius X/Y below (Circle/
+        # Brackets' range is far narrower than Ellipse's 2-5000, so no quadratic curve
+        # is needed here -- linear precision across 2-500 is already fine).
+        self.marker_radius = LabeledSlider(2.0, 500.0, suffix="px")
         # Sliders, not spinboxes: per user report, incrementing these via a spinbox's
         # tiny arrows was uncomfortable, and dragging is the natural interaction for
         # "adjust this oval until it visually fits the galaxy" anyway. 5000px comfortably
@@ -652,6 +654,12 @@ class StylePanel(QWidget):
         double-click on the canvas lands the user directly on that object's own
         controls instead of wherever the Style tab happened to be left."""
         self.tabs.setCurrentIndex(1)
+
+    def show_overlays_tab(self) -> None:
+        """Switches to "Overlays" (index 3 -- see the addTab order above) -- same
+        pattern as show_object_tab, used when clicking the Info Box overlay itself so
+        editing its text is a single click away instead of hunting for this tab."""
+        self.tabs.setCurrentIndex(3)
 
     def set_overlay_settings(self, settings) -> None:
         """Syncs the Overlays tab's widgets from the current OverlaySettings -- called

@@ -28,11 +28,9 @@ logger = logging.getLogger(__name__)
 from ..annotation.models import (
     Annotation,
     BackgroundMode,
-    DecLabelPosition,
     LabelStyle,
     MarkerShape,
     OverlaySettings,
-    RaLabelPosition,
     StylePreset,
 )
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
@@ -44,6 +42,7 @@ from ..annotation.renderer import (
     compute_info_box_geometry,
     compute_label_geometry,
     compute_marker_geometry,
+    place_grid_label_point,
     resolve_connector_color,
 )
 from ..annotation.wcs import SirilWcs
@@ -233,7 +232,7 @@ def render_annotations(
     # skipped otherwise (e.g. exporting before an image ever loaded, which shouldn't
     # normally happen but costs nothing to guard).
     if wcs is not None and overlay_settings is not None:
-        _draw_grid(draw, wcs, overlay_settings.grid, scale)
+        _draw_grid(overlay, wcs, overlay_settings.grid, scale)
 
     for ann in annotations:
         if not ann.enabled:
@@ -383,28 +382,58 @@ def _rgba(hex_color: str, alpha: float) -> tuple[int, int, int, int]:
     return r, g, b, max(0, min(255, round(alpha * 255)))
 
 
-def _draw_grid(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) -> None:
+def _draw_rotated_text(
+    overlay: Image.Image, center: tuple[float, float], text: str, angle_deg: float,
+    font: ImageFont.FreeTypeFont, fill,
+) -> None:
+    """Pillow's ImageDraw has no rotated-text support -- render onto a small
+    transparent layer sized to the text, rotate that layer, then alpha-composite it
+    centered on `center`. Mirrors _draw_rotated_ellipse_outline's "no library shortcut"
+    approach to the same underlying Pillow limitation, just for text instead of a
+    shape."""
+    bbox = font.getbbox(text)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    if text_w <= 0 or text_h <= 0:
+        return
+    pad = 4  # headroom so antialiased glyph edges aren't clipped by the rotation
+    layer = Image.new("RGBA", (text_w + pad * 2, text_h + pad * 2), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((pad - bbox[0], pad - bbox[1]), text, font=font, fill=fill)
+    # Pillow's rotate() is counter-clockwise-positive for a visually upright image;
+    # angle_deg is measured directly off y-down pixel coordinates (clockwise-positive,
+    # matching Qt's rotate() in gui/overlay_item.py -- confirmed against a real
+    # headless render), so it needs negating here to produce the same visual result as
+    # the interactive canvas.
+    rotated = layer.rotate(-angle_deg, expand=True, resample=Image.BICUBIC)
+    paste_x = round(center[0] - rotated.width / 2.0)
+    paste_y = round(center[1] - rotated.height / 2.0)
+    overlay.alpha_composite(rotated, (paste_x, paste_y))
+
+
+def _draw_grid(overlay: Image.Image, wcs: SirilWcs, style, scale: float) -> None:
     if not style.enabled:
         return
     geo = compute_grid_geometry(wcs, style)
+    draw = ImageDraw.Draw(overlay)
     color = _rgba(style.color, style.opacity)
     width = max(1, round(style.line_width * scale))
     for line in geo.lines:
         scaled = [_scaled(p, scale) for p in line]
         draw.line(scaled, fill=color, width=width)
     if geo.labels:
+        # Per user report/reference screenshot: labels run along the grid line itself
+        # (rotated to match its angle), like Siril's own grid overlay, rather than
+        # fixed horizontal/vertical text near an edge -- mirrors gui/overlay_item.py's
+        # GridItem.paint exactly, so the export matches what's shown on screen.
         font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.label_font_size), scale)
+        frame_width, frame_height = wcs.native_width * scale, wcs.native_height * scale
         for label in geo.labels:
-            x, y = _scaled((label.x, label.y), scale)
-            # Anchors so the text grows *inward* from the label's point (which
-            # compute_grid_geometry already inset from the true frame edge) instead of
-            # being centered on it -- centering could still push half the text past
-            # the edge. Pillow anchor codes: horizontal l/m/r, vertical a(scender)/m/d(escender).
-            anchor = {
-                "ra": "ma" if style.ra_label_position is RaLabelPosition.TOP else "md",
-                "dec": "rm" if style.dec_label_position is DecLabelPosition.RIGHT else "lm",
-            }[label.axis]
-            draw.text((x, y), label.text, fill=color, font=font, anchor=anchor)
+            bbox = font.getbbox(label.text)
+            text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            cx, cy = place_grid_label_point(
+                *_scaled((label.x, label.y), scale), label.rotation_deg, text_w, text_h,
+                frame_width, frame_height,
+            )
+            _draw_rotated_text(overlay, (cx, cy), label.text, label.rotation_deg, font, color)
 
 
 def _draw_compass(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float) -> None:

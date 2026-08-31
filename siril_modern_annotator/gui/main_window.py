@@ -750,6 +750,7 @@ class MainWindow(QMainWindow):
         )
         self.info_box_item.moved.connect(self._on_info_box_moved)
         self.info_box_item.context_menu_requested.connect(self._show_info_box_context_menu)
+        self.info_box_item.clicked.connect(self._on_info_box_clicked)
         self.image_view.scene_.addItem(self.grid_item)
         self.image_view.scene_.addItem(self.compass_item)
         self.image_view.scene_.addItem(self.info_box_item)
@@ -844,6 +845,15 @@ class MainWindow(QMainWindow):
         reset_action = menu.addAction("Reset Position")
         reset_action.triggered.connect(self._reset_info_box_position)
         menu.exec(screen_pos)
+
+    def _on_info_box_clicked(self) -> None:
+        # Per user request: clicking the Info Box overlay jumps straight to its text
+        # field instead of leaving the user to go find the Overlays tab themselves --
+        # mirrors _on_object_double_clicked's tab-switch-then-focus pattern below.
+        self.dock_tabs.setCurrentWidget(self.style_panel)
+        self.style_panel.show_overlays_tab()
+        self.style_panel.info_box_text_edit.setFocus()
+        self.style_panel.info_box_text_edit.selectAll()
 
     # --------------------------------------------------------------- scene sync ----
 
