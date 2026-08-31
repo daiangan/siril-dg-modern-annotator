@@ -15,6 +15,8 @@ from siril_modern_annotator.annotation.renderer import (
     _choose_grid_step_deg,
     _format_dec_sexagesimal,
     _format_ra_sexagesimal,
+    _line_local_angle_deg,
+    clamp_rotated_label_point,
     compute_compass_geometry,
     compute_grid_geometry,
 )
@@ -188,6 +190,72 @@ def test_dec_labels_move_to_left_when_configured():
     assert dec_labels
     for label in dec_labels:
         assert label.x < _WIDTH / 2.0
+
+
+def test_grid_labels_carry_the_line_s_local_rotation():
+    """Per user report/reference screenshot: labels should run along the grid line
+    itself (like Siril's own overlay) rather than fixed horizontal/vertical text near
+    an edge, so a real, non-degenerate line must produce a non-zero rotation."""
+    wcs = _wcs()
+    geo = compute_grid_geometry(wcs, GridStyle(enabled=True))
+    assert any(abs(label.rotation_deg) > 1.0 for label in geo.labels)
+
+
+# ------------------------------------------------------- line angle / rotated clamp ----
+
+
+def test_line_local_angle_horizontal():
+    segment = [(0.0, 50.0), (10.0, 50.0), (20.0, 50.0)]
+    assert _line_local_angle_deg(segment, 1) == pytest.approx(0.0)
+
+
+def test_line_local_angle_vertical_normalizes_both_directions_the_same():
+    down = [(0.0, 0.0), (0.0, 10.0), (0.0, 20.0)]
+    up = [(0.0, 20.0), (0.0, 10.0), (0.0, 0.0)]
+    assert _line_local_angle_deg(down, 1) == pytest.approx(90.0)
+    assert _line_local_angle_deg(up, 1) == pytest.approx(90.0)
+
+
+def test_line_local_angle_diagonal_and_its_opposite_direction_match():
+    """A line has no inherent direction -- walking it forward or backward must give
+    the same *orientation* (this is what keeps rotated text right-side-up regardless
+    of which way world_to_pixel happened to sample the line)."""
+    forward = [(0.0, 0.0), (10.0, 10.0), (20.0, 20.0)]
+    backward = list(reversed(forward))
+    assert _line_local_angle_deg(forward, 1) == pytest.approx(45.0)
+    assert _line_local_angle_deg(backward, 1) == pytest.approx(45.0)
+
+
+def test_line_local_angle_handles_a_two_point_segment():
+    assert _line_local_angle_deg([(0.0, 0.0), (10.0, 0.0)], 0) == pytest.approx(0.0)
+
+
+def test_clamp_rotated_label_point_matches_plain_inset_at_zero_rotation():
+    x, y = clamp_rotated_label_point(
+        2.0, 2.0, rotation_deg=0.0, text_width=20.0, text_height=10.0,
+        frame_width=200.0, frame_height=100.0, margin=6.0,
+    )
+    assert x == pytest.approx(6.0 + 10.0)  # margin + half text_width
+    assert y == pytest.approx(6.0 + 5.0)  # margin + half text_height
+
+
+def test_clamp_rotated_label_point_at_90_degrees_swaps_effective_extents():
+    x, _ = clamp_rotated_label_point(
+        2.0, 50.0, rotation_deg=90.0, text_width=20.0, text_height=10.0,
+        frame_width=200.0, frame_height=100.0, margin=6.0,
+    )
+    # Rotated 90 degrees, the text's *height* now determines how far it reaches
+    # horizontally, not its width.
+    assert x == pytest.approx(6.0 + 5.0)
+
+
+def test_clamp_rotated_label_point_falls_back_to_centering_when_label_wont_fit():
+    x, y = clamp_rotated_label_point(
+        0.0, 0.0, rotation_deg=0.0, text_width=500.0, text_height=10.0,
+        frame_width=50.0, frame_height=100.0, margin=6.0,
+    )
+    assert x == pytest.approx(25.0)  # frame_width / 2 -- centered, not clamped to a
+    # range that would otherwise be inverted (lo > hi)
 
 
 # ------------------------------------------------------------------ compass ----

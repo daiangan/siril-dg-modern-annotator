@@ -421,12 +421,21 @@ class GridLabel:
     text: str
     # Which edge this label sits near -- "ra" (a meridian, near the top or bottom edge
     # per style.ra_label_position) or "dec" (a parallel, near the right or left edge
-    # per style.dec_label_position). The drawing backends (gui/overlay_item.py,
-    # export/exporter.py) use this to anchor the text so it grows *inward* from (x, y)
-    # rather than being centered on it -- centering would let text overhang the frame
-    # edge for a label point deliberately placed close to that edge (see
-    # _pick_grid_label_point's margin).
+    # per style.dec_label_position). Only affects which end of the (possibly
+    # off-center) clipped line segment is picked as the anchor -- axis-aligned top/
+    # bottom/left/right text is no longer drawn; see rotation_deg below.
     axis: str
+    # Local tangent angle of the grid line at (x, y), in degrees, normalized to
+    # (-90, 90] so the label is never drawn upside down. Per user report/reference
+    # screenshot: Siril draws its own grid labels running along the line itself
+    # (rotated to match its angle) rather than as fixed horizontal/vertical text near
+    # an edge -- the previous fixed-orientation text, anchored to grow inward from a
+    # point near a corner, could still overhang the frame when that point sat close to
+    # *two* edges at once (only one axis was inset). (x, y) is the label's *center*
+    # once rotated -- see renderer.clamp_rotated_label_point, which the drawing
+    # backends (gui/overlay_item.py, export/exporter.py) call with their own real font
+    # metrics to guarantee the rotated text box stays inside the frame.
+    rotation_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -469,30 +478,80 @@ def _clip_polyline_to_frame(
 _GRID_LABEL_MARGIN_PX = 6.0
 
 
+def _line_local_angle_deg(segment: list[Point], index: int) -> float:
+    """Tangent direction of the (possibly curved) line at segment[index], in degrees,
+    using whichever neighboring sample point is available -- a clipped segment can be
+    as short as 2 points. Normalized to (-90, 90] so text drawn at this angle reads
+    left-to-right rather than upside down (the two ends of a line are otherwise
+    indistinguishable for this purpose, same reasoning as MarkerStyle.rotation_deg's
+    -90..90 UI range)."""
+    n = len(segment)
+    if n < 2:
+        return 0.0
+    i0 = max(0, index - 1)
+    i1 = min(n - 1, index + 1)
+    if i0 == i1:
+        i1 = i0 + 1 if i0 + 1 < n else i0 - 1
+    (x0, y0), (x1, y1) = segment[i0], segment[i1]
+    angle = math.degrees(math.atan2(y1 - y0, x1 - x0))
+    if angle > 90.0:
+        angle -= 180.0
+    elif angle <= -90.0:
+        angle += 180.0
+    return angle
+
+
 def _pick_grid_label_point(
     segment: list[Point], axis: str, style: GridStyle, width: float, height: float
-) -> Point:
+) -> tuple[Point, float]:
     """Where a grid line's label anchors, on a real point of the (possibly curved,
     possibly not-quite-vertical/horizontal) line itself, biased toward the requested
-    edge and inset by a small margin so the text (anchored to grow inward from this
-    point -- see GridLabel) never overhangs the frame. Previously this was always just
-    segment[0] -- wherever the sampling loop happened to enter the frame -- which for
-    many lines landed hard against the very edge, with the export's Pillow anchor
-    defaulting to centered-on-the-point and no margin at all: a real, confirmed report
-    of Dec labels rendering partly or fully outside the exported image."""
+    edge, plus the line's local tangent angle there (see GridLabel.rotation_deg). The
+    plain per-axis margin here is only a rough starting inset -- the real "never
+    overhangs the frame" guarantee, which has to account for the label's actual
+    rotated text size, is clamp_rotated_label_point's job in the drawing backends."""
     if axis == "ra":
         # Roughly vertical: bias toward the top or bottom edge.
-        point = min(segment, key=lambda p: p[1]) if style.ra_label_position is RaLabelPosition.TOP else max(
-            segment, key=lambda p: p[1]
+        idx, point = (
+            min(enumerate(segment), key=lambda iv: iv[1][1])
+            if style.ra_label_position is RaLabelPosition.TOP
+            else max(enumerate(segment), key=lambda iv: iv[1][1])
         )
     else:
         # Roughly horizontal: bias toward the right or left edge.
-        point = max(segment, key=lambda p: p[0]) if style.dec_label_position is DecLabelPosition.RIGHT else min(
-            segment, key=lambda p: p[0]
+        idx, point = (
+            max(enumerate(segment), key=lambda iv: iv[1][0])
+            if style.dec_label_position is DecLabelPosition.RIGHT
+            else min(enumerate(segment), key=lambda iv: iv[1][0])
         )
+    angle = _line_local_angle_deg(segment, idx)
     x = min(max(point[0], _GRID_LABEL_MARGIN_PX), width - _GRID_LABEL_MARGIN_PX)
     y = min(max(point[1], _GRID_LABEL_MARGIN_PX), height - _GRID_LABEL_MARGIN_PX)
-    return x, y
+    return (x, y), angle
+
+
+def clamp_rotated_label_point(
+    x: float, y: float, rotation_deg: float, text_width: float, text_height: float,
+    frame_width: float, frame_height: float, margin: float = _GRID_LABEL_MARGIN_PX,
+) -> Point:
+    """Shifts (x, y) -- the center of a text_width x text_height box rotated by
+    rotation_deg about its own center -- just enough that its rotated axis-aligned
+    bounding box stays within [margin, frame_width-margin] x [margin,
+    frame_height-margin]. A plain axis-aligned half-width/half-height inset (right for
+    horizontal text) isn't enough once the text is rotated to follow a diagonal grid
+    line -- confirmed by a real screenshot of a label overhanging the frame edge near a
+    corner. Standard rotated-rect AABB formula; falls back to centering along an axis
+    where the frame is narrower than the rotated box itself (a very long label on a
+    small image) rather than producing an inverted, empty clamp range."""
+    theta = math.radians(rotation_deg)
+    cos_t, sin_t = abs(math.cos(theta)), abs(math.sin(theta))
+    half_w = (text_width * cos_t + text_height * sin_t) / 2.0
+    half_h = (text_width * sin_t + text_height * cos_t) / 2.0
+    lo_x, hi_x = margin + half_w, frame_width - margin - half_w
+    lo_y, hi_y = margin + half_h, frame_height - margin - half_h
+    clamped_x = (lo_x + hi_x) / 2.0 if lo_x > hi_x else min(max(x, lo_x), hi_x)
+    clamped_y = (lo_y + hi_y) / 2.0 if lo_y > hi_y else min(max(y, lo_y), hi_y)
+    return clamped_x, clamped_y
 
 
 def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
@@ -534,8 +593,10 @@ def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
         lines.extend(segments)
         if style.show_labels:
             for segment in segments:
-                lx, ly = _pick_grid_label_point(segment, "ra", style, width, height)
-                labels.append(GridLabel(lx, ly, _format_ra_sexagesimal(ra_value), axis="ra"))
+                (lx, ly), angle = _pick_grid_label_point(segment, "ra", style, width, height)
+                labels.append(
+                    GridLabel(lx, ly, _format_ra_sexagesimal(ra_value), axis="ra", rotation_deg=angle)
+                )
         ra_value += ra_step
 
     ra_samples = np.linspace(ra_lo, ra_hi, _GRID_SAMPLES_PER_LINE)
@@ -547,8 +608,10 @@ def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
         lines.extend(segments)
         if style.show_labels:
             for segment in segments:
-                lx, ly = _pick_grid_label_point(segment, "dec", style, width, height)
-                labels.append(GridLabel(lx, ly, _format_dec_sexagesimal(dec_value), axis="dec"))
+                (lx, ly), angle = _pick_grid_label_point(segment, "dec", style, width, height)
+                labels.append(
+                    GridLabel(lx, ly, _format_dec_sexagesimal(dec_value), axis="dec", rotation_deg=angle)
+                )
         dec_value += dec_step
 
     return GridGeometry(lines=lines, labels=labels, style=style)
