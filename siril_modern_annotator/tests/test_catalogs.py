@@ -11,6 +11,7 @@ from siril_modern_annotator.annotation.catalogs import (
     CompositeProvider,
     LocalCsvProvider,
     bayer_designation_to_greek,
+    count_local_catalog_entries,
 )
 from siril_modern_annotator.annotation.models import Annotation
 from siril_modern_annotator.annotation.wcs import SirilWcs
@@ -107,6 +108,51 @@ def test_native_pixel_coordinates_are_populated():
     expected_x, expected_y = wcs.world_to_pixel(310.0, 41.0)
     assert abs(center.image_x - expected_x) < 1.0
     assert abs(center.image_y - expected_y) < 1.0
+
+
+def test_local_csv_provider_accepts_a_custom_catalog_files_mapping(tmp_path):
+    """Regression test for Siril's own persistent Astrometry > Annotate > Search
+    Object list (user-DSO-catalogue.csv) -- lives in a different directory than the
+    bundled messier/ngc/etc CSVs and under a catalog key ("user_dso") not in the
+    default _LOCAL_CATALOG_FILES mapping, so LocalCsvProvider needs to accept an
+    override rather than always reading the module-level default. Also confirms the
+    real schema's extra pmra/pmdec/bmag columns (proper motion, blue magnitude -- none
+    of which _parse_file reads) don't break parsing."""
+    csv_path = tmp_path / "user-DSO-catalogue.csv"
+    csv_path.write_text(
+        "name,ra,dec,pmra,pmdec,mag,bmag,alias\n"
+        "HD 191765,310.0,41.0,-4.99,-8.445,8.08,8.08,wr134\n"
+    )
+    provider = LocalCsvProvider(tmp_path, catalog_files={"user_dso": "user-DSO-catalogue.csv"})
+    assert provider.available_catalogs == {"user_dso"}
+    results = provider.query(_wcs(), {"user_dso"})
+    assert len(results) == 1
+    assert results[0].catalog == "user_dso"
+    assert results[0].catalog_name == "HD 191765"
+
+
+def test_local_csv_provider_with_custom_mapping_ignores_unmapped_catalogs(tmp_path):
+    csv_path = tmp_path / "user-DSO-catalogue.csv"
+    csv_path.write_text("name,ra,dec,mag,alias\nHD 191765,310.0,41.0,8.08,wr134\n")
+    provider = LocalCsvProvider(tmp_path, catalog_files={"user_dso": "user-DSO-catalogue.csv"})
+    # "messier" isn't in this custom mapping at all -- must not fall back to the
+    # module-level default and must not error.
+    assert provider.query(_wcs(), {"messier"}) == []
+
+
+def test_count_local_catalog_entries_missing_file_returns_zero(tmp_path):
+    assert count_local_catalog_entries(tmp_path, "user-DSO-catalogue.csv") == 0
+
+
+def test_count_local_catalog_entries_counts_data_rows_not_header(tmp_path):
+    csv_path = tmp_path / "user-DSO-catalogue.csv"
+    csv_path.write_text(
+        "name,ra,dec,mag,alias\n"
+        "Object A,10.0,20.0,8.0,\n"
+        "Object B,11.0,21.0,9.0,\n"
+        "Object C,12.0,22.0,10.0,\n"
+    )
+    assert count_local_catalog_entries(tmp_path, "user-DSO-catalogue.csv") == 3
 
 
 def test_composite_provider_merges_and_dedupes():

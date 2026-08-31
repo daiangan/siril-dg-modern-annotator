@@ -39,9 +39,11 @@ from ..annotation.catalogs import (
     DEFAULT_CATALOG_COLORS,
     ONLINE_ONLY_CATALOGS,
     SUPPORTED_CATALOGS,
+    USER_CATALOG_FILES,
     CompositeProvider,
     LocalCsvProvider,
     VizierProvider,
+    count_local_catalog_entries,
     vizier_is_available,
 )
 from ..annotation.layout import auto_arrange
@@ -113,7 +115,16 @@ class CheckableMenu(QMenu):
 # (no bundled local file, e.g. Barnard) is the one deliberate exception: per user
 # request, those start unchecked rather than silently returning nothing for a
 # first-time/offline user with no explanation.
-_DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS) - ONLINE_ONLY_CATALOGS
+#
+# "user_dso" (Siril's own Astrometry > Annotate > Search Object list) is a second,
+# different kind of exception: whether it should default on isn't a static fact like
+# ONLINE_ONLY_CATALOGS, it depends on how many entries this particular installation's
+# catalogue already has (per user request: on while it's still a short, deliberately
+# curated list, off once it's grown past that). Excluded here and added back
+# conditionally in MainWindow.__init__, which is the earliest point a live bridge
+# connection (needed to read the count) is available.
+_DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS) - ONLINE_ONLY_CATALOGS - {"user_dso"}
+_USER_DSO_DEFAULT_ON_MAX_ENTRIES = 10
 
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA"
 
@@ -147,7 +158,12 @@ class MainWindow(QMainWindow):
         self.icc_profile: bytes | None = None
         self.source_identifier: str = ""
         saved_catalogs = last_used_store.load_last_used_catalogs()
-        self.active_catalogs: set[str] = saved_catalogs if saved_catalogs is not None else set(_DEFAULT_CATALOGS)
+        if saved_catalogs is not None:
+            self.active_catalogs: set[str] = saved_catalogs
+        else:
+            self.active_catalogs = set(_DEFAULT_CATALOGS)
+            if self._user_dso_catalog_should_default_on():
+                self.active_catalogs.add("user_dso")
         # Per-catalog marker/connector color (brief #13-adjacent request). A single
         # dict, mutated in place (never reassigned wholesale) on every edit -- every
         # MarkerItem/ConnectorItem is handed this exact same object at construction, so
@@ -542,9 +558,36 @@ class MainWindow(QMainWindow):
         # coarser coordinates were arriving (and therefore winning) first. Local's finer
         # position now wins that tie; VII/118 still contributes richer object-type data
         # via _dedupe's enrichment step.
-        return CompositeProvider(
-            [LocalCsvProvider(self.bridge.get_system_catalogue_dir()), VizierProvider()]
-        )
+        providers: list = [LocalCsvProvider(self.bridge.get_system_catalogue_dir()), VizierProvider()]
+        # "user_dso": Siril's own Astrometry > Annotate > Search Object list -- lives in
+        # a different, writable directory (get_user_catalogue_dir(), not
+        # get_system_catalogue_dir()), via a newer sirilpy accessor
+        # (get_siril_userdatadir()) than the core catalogs depend on. Guarded so an
+        # older sirilpy without it just silently skips this optional extra rather than
+        # breaking image loading entirely -- same defensive pattern as
+        # get_loaded_image_filename().
+        try:
+            providers.append(
+                LocalCsvProvider(self.bridge.get_user_catalogue_dir(), catalog_files=USER_CATALOG_FILES)
+            )
+        except Exception:
+            logger.debug("Could not reach Siril's user catalogue directory.", exc_info=True)
+        return CompositeProvider(providers)
+
+    def _user_dso_catalog_should_default_on(self) -> bool:
+        """First-run-only default for "user_dso" (see _catalog_provider's comment).
+        Per user request: on while Siril's own Annotate-tool catalogue is still a
+        short, deliberately curated list (<= _USER_DSO_DEFAULT_ON_MAX_ENTRIES entries);
+        off once it's grown past that, so it doesn't clutter every future image by
+        default -- stays a one-click toggle either way."""
+        try:
+            count = count_local_catalog_entries(
+                self.bridge.get_user_catalogue_dir(), USER_CATALOG_FILES["user_dso"]
+            )
+        except Exception:
+            logger.debug("Could not read the user_dso catalogue for the first-run default.", exc_info=True)
+            return False
+        return count <= _USER_DSO_DEFAULT_ON_MAX_ENTRIES
 
     def _start_catalog_fetch(self, catalogs: set[str]) -> None:
         if self.wcs is None:

@@ -289,6 +289,10 @@ CATALOG_PRIORITY: dict[str, int] = {
     # Horsehead's dark patch as "B33"), so Barnard wins the on-image label.
     "barnard": 24,
     "bright_star": 30,
+    # A deliberately, individually searched-and-confirmed object (Siril's own
+    # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"
+    # below, this app's own manually-placed custom objects, which stay the highest.
+    "user_dso": 32,
     "simbad": 40,
     "user": 5,
 }
