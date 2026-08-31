@@ -7,7 +7,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from siril_modern_annotator.annotation.catalogs import DEFAULT_CATALOG_COLORS, SUPPORTED_CATALOGS
+from siril_modern_annotator.annotation.catalogs import (
+    DEFAULT_CATALOG_COLORS,
+    ONLINE_ONLY_CATALOGS,
+    SUPPORTED_CATALOGS,
+)
 from siril_modern_annotator.annotation.models import Annotation, LabelStyle, MarkerStyle, StylePreset
 from siril_modern_annotator.annotation.renderer import (
     compute_label_geometry,
@@ -34,6 +38,19 @@ def test_default_catalog_colors_cover_every_supported_catalog():
     # never fetched, so a checkbox for it would do nothing).
     assert set(SUPPORTED_CATALOGS.keys()) <= set(DEFAULT_CATALOG_COLORS.keys())
     assert set(DEFAULT_CATALOG_COLORS.keys()) - set(SUPPORTED_CATALOGS.keys()) == {"user"}
+
+
+def test_online_only_catalogs_is_derived_not_stale():
+    """Regression test: a catalog with a VizieR ID but no bundled Siril CSV has no
+    offline fallback at all (unlike messier/ngc/ic/sh2/bright_star, which still work
+    offline via their local file even when VizieR is unreachable) -- main_window.py
+    uses this set to keep such catalogs off by default and to show a "needs an
+    internet connection" status message instead of a misleading "0 objects" one.
+    Barnard is the only one right now; this must stay correct as more VizieR-only
+    catalogs (vdB, Abell, ...) are added, without anyone having to remember to update
+    a hand-maintained list."""
+    assert ONLINE_ONLY_CATALOGS == {"barnard"}
+    assert ONLINE_ONLY_CATALOGS <= set(SUPPORTED_CATALOGS)
 
 
 def test_default_catalog_colors_are_valid_distinct_hex_and_pastel():

@@ -26,6 +26,7 @@ from siril_modern_annotator.annotation.catalogs import (
     _v50_row_to_annotation,
     _vii20_row_to_annotation,
     _vii118_row_to_annotation,
+    _vii220a_row_to_annotation,
     bayer_designation_to_greek,
 )
 from siril_modern_annotator.annotation.wcs import SirilWcs
@@ -201,6 +202,62 @@ def test_vii20_b1900_coordinates_are_precessed_to_j2000():
     from astropy import units as u
     naive_ra = Angle("20 38 54.0", unit=u.hourangle).degree
     assert abs(ann.ra - naive_ra) > 0.1, "B1900->J2000 precession does not appear to have been applied"
+
+
+# --- VII/220A (Barnard 1919, dark nebulae) -- real row from a live query near the ------
+# --- Horsehead (B33), confirmed 2026-08-31. A third equinox (B1875) alongside VII/118's
+# --- B2000 and VII/20's B1900 -- this parser sidesteps it entirely by using VizieR's own
+# --- pre-converted _RA.icrs/_DE.icrs columns instead of transforming RA1875/DE1875 itself.
+
+_VII220A_COLUMNS = ["Barn", "RA1875", "DE1875", "Diam", "_RA.icrs", "_DE.icrs"]
+
+
+def _vii220a_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII220A_COLUMNS, dtype=[str, str, str, "float32", str, str])
+
+
+def test_vii220a_real_row_parses_as_barnard():
+    table = _vii220a_table([["33", "05 34 36", "-02 32", 4.0, "05 40 52.9", "-02 27 57"]])
+    wcs = _wcs_at(85.22, -2.466)
+    ann = _vii220a_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "barnard"
+    assert ann.catalog_name == "B33"
+    assert ann.object_type == "dark nebula"
+    assert ann.angular_size == 4.0
+    assert ann.magnitude is None  # dark nebulae have no point-source magnitude
+    assert ann.ra == pytest.approx(85.22, abs=0.01)
+    assert ann.dec == pytest.approx(-2.466, abs=0.01)
+
+
+def test_vii220a_missing_diameter_still_parses():
+    # VizieR represents a missing float column as NaN, not a "--" string, for a real
+    # float32-typed column -- str(nan) == "nan", which _row_str's existing missing-
+    # value filter already catches.
+    table = _vii220a_table([["72", "17 20 06", "-23 16", float("nan"), "17 23 30.0", "-23 46 00"]])
+    wcs = _wcs_at(260.875, -23.767)
+    ann = _vii220a_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog_name == "B72"
+    assert ann.angular_size is None
+
+
+def test_vii220a_missing_barn_number_returns_none():
+    table = _vii220a_table([["", "05 34 36", "-02 32", 4.0, "05 40 52.9", "-02 27 57"]])
+    wcs = _wcs_at(85.22, -2.466)
+    assert _vii220a_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii220a_object_outside_field_is_dropped():
+    table = _vii220a_table([["33", "05 34 36", "-02 32", 4.0, "05 40 52.9", "-02 27 57"]])
+    wcs = _wcs_at(310.0, 45.0)  # Cygnus field -- nowhere near B33
+    assert _vii220a_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii220a_malformed_coordinates_return_none_not_crash():
+    table = _vii220a_table([["33", "05 34 36", "-02 32", 4.0, "not-a-coord", "-02 27 57"]])
+    wcs = _wcs_at(85.22, -2.466)
+    assert _vii220a_row_to_annotation(table[0], wcs, None) is None
 
 
 # --- _run_with_hard_timeout ------------------------------------------------------------

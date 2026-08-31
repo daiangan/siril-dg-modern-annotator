@@ -59,6 +59,11 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     "ldn": "Lynds Catalogue of Dark Nebulae (LDN)",
     "sh2": "Sharpless Catalogue (Sh2)",
     "bright_star": "Star Catalogue",
+    # Unlike every catalog above, this one has no bundled Siril CSV (see
+    # _LOCAL_CATALOG_FILES) -- VII/220A is VizieR-only, so it's also in
+    # ONLINE_ONLY_CATALOGS below, which keeps it off by default and drives the
+    # "needs an internet connection" status message in main_window.py.
+    "barnard": "Barnard Catalogue of Dark Nebulae (B)",
 }
 
 # First-time defaults for per-catalog marker/connector color (brief: "clean and modern,
@@ -74,6 +79,7 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "ldn": "#8FA9D6",  # soft slate blue
     "sh2": "#F2938C",  # soft coral
     "bright_star": "#F5E6A3",  # pale warm yellow
+    "barnard": "#9FC9A8",  # soft sage green
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
     # with by default. Per user request: plain white, so a custom marker reads as
@@ -305,10 +311,7 @@ class LocalCsvProvider(CatalogProvider):
 
 
 # VizieR catalog IDs mirroring siril-scripts/utility/Svenesis-AnnotateImage.py's proven
-# query set (RESEARCH.md #8, Option D). Only catalogs with an actual row parser below
-# (see _VIZIER_ROW_PARSERS) return results -- "barnard"/VII/220A has no parser (Barnard
-# isn't in SUPPORTED_CATALOGS / exposed in the catalog toggle UI, so it's dead weight;
-# left mapped here only so re-adding it later is a one-line change).
+# query set (RESEARCH.md #8, Option D).
 _VIZIER_CATALOGS: dict[str, str] = {
     "messier": "VII/118",  # NGC 2000.0 -- also covers ngc/ic
     "ngc": "VII/118",
@@ -317,6 +320,17 @@ _VIZIER_CATALOGS: dict[str, str] = {
     "barnard": "VII/220A",
     "bright_star": "V/50",
 }
+
+# A catalog with a VizieR ID but no bundled Siril CSV (see _LOCAL_CATALOG_FILES) has no
+# offline fallback at all -- unlike messier/ngc/ic/sh2/bright_star, which still return
+# their local-file results even when VizieR is unreachable, this one goes fully silent.
+# Derived rather than hand-maintained so the next VizieR-only catalog (vdB, Abell, ...)
+# is automatically covered too: main_window.py excludes these from the first-run default
+# catalog selection, and shows a status message instead of a misleading "0 objects" when
+# one is toggled on with VizieR unavailable (see vizier_is_available() below).
+ONLINE_ONLY_CATALOGS: frozenset[str] = frozenset(
+    set(_VIZIER_CATALOGS) & (set(SUPPORTED_CATALOGS) - set(_LOCAL_CATALOG_FILES))
+)
 
 # NGC2000.0's (VII/118) "Type" column codes -- standard convention for this catalog.
 _NGC2000_TYPE_NAMES: dict[str, str] = {
@@ -507,6 +521,47 @@ def _vii20_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "An
     )
 
 
+def _vii220a_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/220A (Barnard 1919, dark nebulae). Real, confirmed schema (live-queried
+    against VizieR): Barn is a bare number ("33"); native coordinates are RA1875/DE1875
+    (equinox B1875, a third equinox alongside VII/118's B2000 and VII/20's B1900 --
+    yet another reason every parser here insists on live-checking rather than assuming
+    a shared convention), but VizieR also returns _RA.icrs/_DE.icrs pre-converted to
+    ICRS, sparing the manual frame-transform VII/20's parser needs to do itself.
+    No magnitude field (dark nebulae aren't point sources); Diam is in arcmin, same
+    convention as VII/20's Diam."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    barn_num = _row_str(row, "Barn")
+    if not barn_num:
+        return None
+    ra_str, dec_str = _row_str(row, "_RA.icrs"), _row_str(row, "_DE.icrs")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="barnard",
+        catalog_name=f"B{barn_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="dark nebula",
+        angular_size=_safe_float(_row_str(row, "Diam")),
+        priority=default_priority_for_catalog("barnard"),
+    )
+
+
 # One parser per queryable VizieR catalog ID -- replaces a previous generic column-name
 # guesser (colnames.get("ra") or colnames.get("_raj2000") or ...) that silently returned
 # zero rows for every one of these catalogs: real VizieR schemas use sexagesimal-string
@@ -518,12 +573,22 @@ _VIZIER_ROW_PARSERS = {
     "VII/118": _vii118_row_to_annotation,
     "V/50": _v50_row_to_annotation,
     "VII/20": _vii20_row_to_annotation,
+    "VII/220A": _vii220a_row_to_annotation,
 }
 
 # Circuit breaker: flips off after the first VizieR connectivity failure and stays off
 # for the rest of the process, so an unreachable/slow VizieR doesn't hang every
 # subsequent catalog fetch too.
 _vizier_available = True
+
+
+def vizier_is_available() -> bool:
+    """Read-only accessor for the circuit breaker above -- main_window.py uses this to
+    tell "zero results because VizieR is unreachable" apart from "zero results because
+    there's genuinely nothing there", specifically for ONLINE_ONLY_CATALOGS entries
+    (everything else still returns its local-file results either way, so the
+    distinction doesn't matter for them)."""
+    return _vizier_available
 
 
 class VizierProvider(CatalogProvider):
@@ -619,7 +684,7 @@ class VizierProvider(CatalogProvider):
 # against each other by position (the same object legitimately gets cross-referenced,
 # e.g. M42 == NGC1976), but a star catalog entry never counts as a positional duplicate
 # of anything outside its own catalog.
-_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn"}
+_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard"}
 
 
 def _same_dedup_class(catalog_a: str, catalog_b: str) -> bool:

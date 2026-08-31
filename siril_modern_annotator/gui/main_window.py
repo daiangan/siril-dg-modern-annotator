@@ -37,10 +37,12 @@ from PyQt6.QtWidgets import (
 from .. import __version__
 from ..annotation.catalogs import (
     DEFAULT_CATALOG_COLORS,
+    ONLINE_ONLY_CATALOGS,
     SUPPORTED_CATALOGS,
     CompositeProvider,
     LocalCsvProvider,
     VizierProvider,
+    vizier_is_available,
 )
 from ..annotation.layout import auto_arrange
 from ..annotation.models import (
@@ -107,8 +109,11 @@ class CheckableMenu(QMenu):
 # Every supported catalog is on by default, matching Siril's own catalog picker (which
 # ships with all its catalogs checked) -- confirmed as a real gap when a user compared
 # our default selection against Siril's own and found LDN missing even though our
-# LocalCsvProvider already supports it; it just wasn't in this set.
-_DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS)
+# LocalCsvProvider already supports it; it just wasn't in this set. ONLINE_ONLY_CATALOGS
+# (no bundled local file, e.g. Barnard) is the one deliberate exception: per user
+# request, those start unchecked rather than silently returning nothing for a
+# first-time/offline user with no explanation.
+_DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS) - ONLINE_ONLY_CATALOGS
 
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA"
 
@@ -587,7 +592,16 @@ class MainWindow(QMainWindow):
             if not any(abs(r.ra - e.ra) < threshold_deg and abs(r.dec - e.dec) < threshold_deg for e in existing)
         ]
         if not new_ones:
-            self.connection_label.setText(f"{len(self.annotations)} objects — {self.source_identifier}")
+            # An ONLINE_ONLY_CATALOGS entry (no local fallback -- see that constant's
+            # own comment) returning zero results while VizieR is known-unreachable
+            # this session is indistinguishable, from the results alone, from "there's
+            # genuinely nothing in this field" -- surface which one it actually was
+            # rather than silently showing the same "N objects" text either way.
+            if catalog in ONLINE_ONLY_CATALOGS and not vizier_is_available():
+                label = SUPPORTED_CATALOGS.get(catalog, catalog)
+                self.connection_label.setText(f"{label} needs an internet connection — couldn't reach VizieR")
+            else:
+                self.connection_label.setText(f"{len(self.annotations)} objects — {self.source_identifier}")
             return
         self.annotations.extend(new_ones)
         for ann in new_ones:

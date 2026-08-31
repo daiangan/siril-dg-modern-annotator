@@ -283,7 +283,11 @@ CATALOG_PRIORITY: dict[str, int] = {
     "ic": 20,
     "ngc": 20,
     "ldn": 25,
-    "barnard": 25,
+    # One better than ldn (not tied) so Auto Arrange/dedup have a deterministic winner
+    # when the same dark nebula is cataloged in both -- B-numbers (Barnard) are the
+    # more commonly cited name for these in astrophotography circles (e.g. the
+    # Horsehead's dark patch as "B33"), so Barnard wins the on-image label.
+    "barnard": 24,
     "bright_star": 30,
     "simbad": 40,
     "user": 5,
