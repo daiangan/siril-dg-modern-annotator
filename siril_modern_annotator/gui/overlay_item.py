@@ -17,12 +17,10 @@ from PyQt6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphics
 
 from ..annotation.models import CompassStyle, GridStyle, InfoBoxStyle
 from ..annotation.renderer import (
-    GRID_LABEL_LINE_GAP_PX,
-    clamp_rotated_label_point,
     compute_compass_geometry,
     compute_grid_geometry,
     compute_info_box_geometry,
-    grid_label_perpendicular_offset,
+    place_grid_label_point,
 )
 from ..annotation.wcs import SirilWcs
 
@@ -84,26 +82,18 @@ class GridItem(QGraphicsItem):
             frame_width, frame_height = float(self.wcs.native_width), float(self.wcs.native_height)
             for label in geo.labels:
                 # Per user report/reference screenshot: labels run along the grid line
-                # itself (rotated to match its angle), like Siril's own grid overlay,
-                # rather than fixed horizontal/vertical text near an edge -- which
-                # could overhang the frame near a corner even after
-                # compute_grid_geometry's own inset (only one axis was accounted for).
-                # clamp_rotated_label_point does the real, rotation-aware inset here,
-                # using this font's actual metrics -- renderer.py itself has no font.
+                # itself (rotated to match its angle), sitting close to it, like
+                # Siril's own grid overlay -- place_grid_label_point does the real,
+                # rotation-aware positioning here using this font's actual metrics
+                # (renderer.py itself has no font).
                 text_width = metrics.horizontalAdvance(label.text)
                 text_height = metrics.height()
-                cx, cy = clamp_rotated_label_point(
+                cx, cy = place_grid_label_point(
                     label.x, label.y, label.rotation_deg, text_width, text_height,
                     frame_width, frame_height,
                 )
-                # Per user request: sit noticeably closer to the line than dead
-                # center -- nudge toward it by however far brings the label's near
-                # edge to GRID_LABEL_LINE_GAP_PX away, using the safety margin the
-                # clamp above already reserved rather than reducing it.
-                nudge = max(0.0, text_height / 2.0 - GRID_LABEL_LINE_GAP_PX)
-                dx, dy = grid_label_perpendicular_offset(label.rotation_deg, nudge)
                 painter.save()
-                painter.translate(cx + dx, cy + dy)
+                painter.translate(cx, cy)
                 painter.rotate(label.rotation_deg)
                 # drawText's point is the text's baseline-left corner; offset so the
                 # (unrotated, local) text is centered on the origin just translated to.

@@ -541,12 +541,14 @@ def clamp_rotated_label_point(
     """Shifts (x, y) -- the center of a text_width x text_height box rotated by
     rotation_deg about its own center -- just enough that its rotated axis-aligned
     bounding box stays within [margin, frame_width-margin] x [margin,
-    frame_height-margin]. A plain axis-aligned half-width/half-height inset (right for
-    horizontal text) isn't enough once the text is rotated to follow a diagonal grid
-    line -- confirmed by a real screenshot of a label overhanging the frame edge near a
-    corner. Standard rotated-rect AABB formula; falls back to centering along an axis
-    where the frame is narrower than the rotated box itself (a very long label on a
-    small image) rather than producing an inverted, empty clamp range."""
+    frame_height-margin]. Standard rotated-rect AABB formula; falls back to centering
+    along an axis where the frame is narrower than the rotated box itself (a very long
+    label on a small image) rather than producing an inverted, empty clamp range.
+
+    Only used as place_grid_label_point's last-resort fallback now (see its docstring
+    for why an axis-aligned clamp on its own isn't the real fix here) -- kept as its
+    own tested function since the fallback case is real and worth covering
+    independently."""
     theta = math.radians(rotation_deg)
     cos_t, sin_t = abs(math.cos(theta)), abs(math.sin(theta))
     half_w = (text_width * cos_t + text_height * sin_t) / 2.0
@@ -569,6 +571,65 @@ def grid_label_perpendicular_offset(rotation_deg: float, distance: float) -> Poi
     not this function, which only knows the direction."""
     theta = math.radians(rotation_deg)
     return (distance * math.sin(theta), -distance * math.cos(theta))
+
+
+def _slide_range_for_axis(p: float, d: float, lo: float, hi: float) -> tuple[float, float]:
+    """Range of t (distance along a direction with component d on this axis) for which
+    p + t*d stays within [lo, hi]. Empty (returned as an inverted, lo>hi-style pair)
+    if d is ~0 and p itself is already outside [lo, hi] -- moving along this direction
+    can never fix that axis on its own."""
+    if abs(d) < 1e-9:
+        return (-math.inf, math.inf) if lo <= p <= hi else (math.inf, -math.inf)
+    t1, t2 = (lo - p) / d, (hi - p) / d
+    return (t1, t2) if t1 <= t2 else (t2, t1)
+
+
+def place_grid_label_point(
+    x: float, y: float, rotation_deg: float, text_width: float, text_height: float,
+    frame_width: float, frame_height: float,
+    gap: float = GRID_LABEL_LINE_GAP_PX, margin: float = _GRID_LABEL_MARGIN_PX,
+) -> Point:
+    """Where a grid label's text should actually be centered when drawn: close to its
+    line -- GRID_LABEL_LINE_GAP_PX from it, not dead-centered on it (per user request)
+    -- while never overhanging the frame.
+
+    (x, y) is a real point *on* the line. This first nudges perpendicular to the line
+    by grid_label_perpendicular_offset (same distance for every label, since it only
+    depends on font metrics, not position), then -- if the resulting rotated text box
+    would overhang the frame -- slides that point *along the line's own direction*
+    until it fits, rather than clamping x and y independently.
+
+    That distinction is the actual fix for a real report: an independent per-axis
+    clamp (clamp_rotated_label_point) can push the point in a direction unrelated to
+    the line at all (whatever an axis-aligned box needs), which changed each label's
+    apparent distance from its line inconsistently -- some barely moved, others were
+    dragged noticeably off the line, especially near a corner where both axes needed
+    correcting. Sliding along the line instead preserves the perpendicular
+    (gap-from-line) distance exactly, for every label, uniformly. Falls back to the
+    old independent-axis clamp only if no point along the line satisfies both axes at
+    once (the line exits the frame at too shallow an angle relative to the margin) --
+    a rare case where being slightly off the line beats not fitting at all."""
+    theta = math.radians(rotation_deg)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    nudge = max(0.0, text_height / 2.0 - gap)
+    dx, dy = grid_label_perpendicular_offset(rotation_deg, nudge)
+    px, py = x + dx, y + dy
+
+    cos_a, sin_a = abs(cos_t), abs(sin_t)
+    half_w = (text_width * cos_a + text_height * sin_a) / 2.0
+    half_h = (text_width * sin_a + text_height * cos_a) / 2.0
+    lo_x, hi_x = margin + half_w, frame_width - margin - half_w
+    lo_y, hi_y = margin + half_h, frame_height - margin - half_h
+    if lo_x > hi_x or lo_y > hi_y:
+        return clamp_rotated_label_point(px, py, rotation_deg, text_width, text_height, frame_width, frame_height, margin)
+
+    t_lo_x, t_hi_x = _slide_range_for_axis(px, cos_t, lo_x, hi_x)
+    t_lo_y, t_hi_y = _slide_range_for_axis(py, sin_t, lo_y, hi_y)
+    t_lo, t_hi = max(t_lo_x, t_lo_y), min(t_hi_x, t_hi_y)
+    if t_lo > t_hi:
+        return clamp_rotated_label_point(px, py, rotation_deg, text_width, text_height, frame_width, frame_height, margin)
+    t = min(max(0.0, t_lo), t_hi)  # move as little as possible from the nudged point
+    return px + t * cos_t, py + t * sin_t
 
 
 def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:

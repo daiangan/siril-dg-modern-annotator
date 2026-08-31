@@ -11,6 +11,7 @@ import pytest
 
 from siril_modern_annotator.annotation.models import CompassStyle, DecLabelPosition, GridStyle, RaLabelPosition
 from siril_modern_annotator.annotation.renderer import (
+    GRID_LABEL_LINE_GAP_PX,
     _GRID_LABEL_MARGIN_PX,
     _choose_grid_step_deg,
     _format_dec_sexagesimal,
@@ -19,6 +20,7 @@ from siril_modern_annotator.annotation.renderer import (
     clamp_rotated_label_point,
     compute_compass_geometry,
     compute_grid_geometry,
+    place_grid_label_point,
 )
 from siril_modern_annotator.annotation.wcs import SirilWcs
 
@@ -256,6 +258,54 @@ def test_clamp_rotated_label_point_falls_back_to_centering_when_label_wont_fit()
     )
     assert x == pytest.approx(25.0)  # frame_width / 2 -- centered, not clamped to a
     # range that would otherwise be inverted (lo > hi)
+
+
+def _perpendicular_distance(x0, y0, x1, y1, rotation_deg):
+    """Component of (x1-x0, y1-y0) perpendicular to a line at rotation_deg -- used to
+    verify place_grid_label_point keeps a label the same true distance from its line
+    regardless of how it got shifted to fit the frame."""
+    theta = math.radians(rotation_deg)
+    dx, dy = x1 - x0, y1 - y0
+    return -dx * math.sin(theta) + dy * math.cos(theta)
+
+
+def test_place_grid_label_point_keeps_a_consistent_gap_near_a_corner():
+    """Regression test for a real report: an independent per-axis clamp could push a
+    label off its line by an inconsistent amount depending on how close to a frame
+    corner it started -- some labels barely moved, others were dragged noticeably off
+    their line. Sliding along the line's own direction instead must preserve the
+    perpendicular (gap-from-line) distance exactly, whether or not the point needed to
+    slide at all to fit."""
+    rotation = 25.0
+    text_width, text_height = 60.0, 14.0
+    expected_gap = text_height / 2.0 - GRID_LABEL_LINE_GAP_PX
+
+    # Comfortably inside the frame -- no sliding needed at all.
+    interior = place_grid_label_point(
+        400.0, 300.0, rotation, text_width, text_height, frame_width=900.0, frame_height=700.0,
+    )
+    # Right at a corner -- sliding along the line is needed to avoid overhang.
+    corner = place_grid_label_point(
+        5.0, 5.0, rotation, text_width, text_height, frame_width=900.0, frame_height=700.0,
+    )
+    interior_gap = abs(_perpendicular_distance(400.0, 300.0, *interior, rotation))
+    corner_gap = abs(_perpendicular_distance(5.0, 5.0, *corner, rotation))
+    assert interior_gap == pytest.approx(expected_gap, abs=0.1)
+    assert corner_gap == pytest.approx(expected_gap, abs=0.1)
+
+
+def test_place_grid_label_point_stays_within_frame_near_a_corner():
+    x, y = place_grid_label_point(
+        5.0, 5.0, rotation_deg=25.0, text_width=60.0, text_height=14.0,
+        frame_width=900.0, frame_height=700.0,
+    )
+    theta = math.radians(25.0)
+    half_w = (60.0 * abs(math.cos(theta)) + 14.0 * abs(math.sin(theta))) / 2.0
+    half_h = (60.0 * abs(math.sin(theta)) + 14.0 * abs(math.cos(theta))) / 2.0
+    assert _GRID_LABEL_MARGIN_PX - 1e-6 <= x - half_w
+    assert x + half_w <= 900.0 - _GRID_LABEL_MARGIN_PX + 1e-6
+    assert _GRID_LABEL_MARGIN_PX - 1e-6 <= y - half_h
+    assert y + half_h <= 700.0 - _GRID_LABEL_MARGIN_PX + 1e-6
 
 
 # ------------------------------------------------------------------ compass ----
