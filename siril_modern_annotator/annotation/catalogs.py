@@ -787,13 +787,25 @@ class CompositeProvider(CatalogProvider):
                         ann.angular_size = ann.angular_size if ann.angular_size is not None else existing.angular_size
                         kept[kept.index(existing)] = ann
                     else:
-                        # Prefer the richer record (has common_name/object_type/magnitude).
+                        # Prefer the richer record (has common_name/object_type/magnitude)
+                        # but never touch existing.ra/dec/image_x/image_y here -- keeping
+                        # whichever result arrived first is deliberate (see
+                        # _catalog_provider's comment on provider order: Local arrives
+                        # first specifically so its finer position wins this tie).
                         if ann.common_name and not existing.common_name:
                             existing.common_name = ann.common_name
                         if ann.magnitude is not None and existing.magnitude is None:
                             existing.magnitude = ann.magnitude
                         if ann.angular_size is not None and existing.angular_size is None:
                             existing.angular_size = ann.angular_size
+                        # LocalCsvProvider has no real object-type data and sets this to
+                        # the catalog name itself as a placeholder (e.g. "ngc") -- VII/118
+                        # (via VizierProvider) does carry a real NGC2000.0 type code, so
+                        # let it fill that placeholder in without touching position.
+                        existing_type_is_placeholder = existing.object_type in (None, "unknown", existing.catalog)
+                        ann_type_is_real = ann.object_type not in (None, "unknown", ann.catalog)
+                        if ann_type_is_real and existing_type_is_placeholder:
+                            existing.object_type = ann.object_type
                     break
             if not duplicate:
                 kept.append(ann)

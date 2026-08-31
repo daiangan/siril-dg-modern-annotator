@@ -513,8 +513,17 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------- catalog fetching ----
 
     def _catalog_provider(self) -> CompositeProvider:
+        # Local first, VizieR second: when the same object comes back from both (e.g.
+        # NGC/IC/Messier from VII/118 vs Siril's own bundled CSV) and CompositeProvider's
+        # dedup ties on catalog priority, it keeps whichever result arrived first -- see
+        # _dedupe's own comment on VII/118's RAB2000/DEB2000 being low precision (only
+        # ~0.1min RA / 1' Dec). A real screenshot showed markers for NGC5471 and other
+        # compact objects landing up to ~1' off their true position because VizieR's
+        # coarser coordinates were arriving (and therefore winning) first. Local's finer
+        # position now wins that tie; VII/118 still contributes richer object-type data
+        # via _dedupe's enrichment step.
         return CompositeProvider(
-            [VizierProvider(), LocalCsvProvider(self.bridge.get_system_catalogue_dir())]
+            [LocalCsvProvider(self.bridge.get_system_catalogue_dir()), VizierProvider()]
         )
 
     def _start_catalog_fetch(self, catalogs: set[str]) -> None:
