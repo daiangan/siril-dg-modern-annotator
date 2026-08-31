@@ -164,6 +164,16 @@ class SirilBridge:
         siril = self._require_connection()
         return Path(siril.get_siril_systemdatadir()) / "catalogue"
 
+    def get_user_catalogue_dir(self) -> Path:
+        """Writable per-user catalogue directory -- distinct from
+        get_system_catalogue_dir()'s read-only, app-bundled one (messier.csv etc). This
+        is where Siril's own Astrometry > Annotate > Search Object > Apply persists a
+        manually searched/confirmed object into user-DSO-catalogue.csv, confirmed by
+        inspecting a real installation's Application Support folder: nothing gets
+        written into the image's own FITS header for this."""
+        siril = self._require_connection()
+        return Path(siril.get_siril_userdatadir()) / "catalogue"
+
     def get_image_icc_profile(self) -> bytes | None:
         return self._require_connection().get_image_iccprofile()
 

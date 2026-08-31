@@ -47,6 +47,22 @@ _LOCAL_CATALOG_FILES: dict[str, str] = {
     "bright_star": "stars.csv",
 }
 
+# Siril's own persistent record of objects manually searched and applied via its
+# Astrometry > Annotate > Search Object dialog -- confirmed by inspecting a real
+# installation: nothing gets written into the image's FITS header for this (checked
+# against a real user-annotated file), it accumulates in this one CSV instead, in a
+# *different* directory from _LOCAL_CATALOG_FILES above (SirilBridge.get_user_catalogue_dir(),
+# the writable per-user data dir, vs get_system_catalogue_dir()'s read-only app-bundled
+# one) -- so this needs its own LocalCsvProvider instance, not just another entry in
+# _LOCAL_CATALOG_FILES. Schema is name/ra/dec/pmra/pmdec/mag/bmag/alias -- pmra/pmdec
+# (proper motion) and bmag are simply unused by _parse_file, same as any other extra
+# column. Catalog key deliberately isn't "user" -- that's already this app's own
+# manually-placed custom objects (models.CATALOG_PRIORITY, right-click "Add Custom
+# Object"), an unrelated, per-project concept.
+USER_CATALOG_FILES: dict[str, str] = {
+    "user_dso": "user-DSO-catalogue.csv",
+}
+
 # Every catalog we can actually query (via LocalCsvProvider and/or VizierProvider),
 # with a display label matching Siril's own catalog-picker naming (brief #13's catalog
 # toggle UI) -- deliberately does NOT include constellations/constellation names, since
@@ -64,6 +80,10 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     # ONLINE_ONLY_CATALOGS below, which keeps it off by default and drives the
     # "needs an internet connection" status message in main_window.py.
     "barnard": "Barnard Catalogue of Dark Nebulae (B)",
+    # Siril's own persistent Astrometry > Annotate > Search Object list (see
+    # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
+    # manually-placed custom objects.
+    "user_dso": "Siril User Catalogue",
 }
 
 # First-time defaults for per-catalog marker/connector color (brief: "clean and modern,
@@ -80,6 +100,7 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "sh2": "#F2938C",  # soft coral
     "bright_star": "#F5E6A3",  # pale warm yellow
     "barnard": "#9FC9A8",  # soft sage green
+    "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
     # with by default. Per user request: plain white, so a custom marker reads as
@@ -213,22 +234,25 @@ def bayer_designation_to_greek(name: str) -> str:
 
 
 class LocalCsvProvider(CatalogProvider):
-    """Reads Siril's bundled annotation catalogs directly from disk.
+    """Reads catalog CSVs directly from disk -- either Siril's bundled, read-only
+    catalogs, or (via catalog_files=USER_CATALOG_FILES) Siril's own writable per-user
+    catalogue directory (see that constant's docstring).
 
-    catalogue_dir must be the directory returned by
-    SirilInterface.get_siril_systemdatadir() joined with "catalogue" (see
-    RESEARCH.md #8, Option C) for built-in catalogs. This class does not know about
-    sirilpy at all — the caller resolves the path.
+    catalogue_dir must be the directory returned by SirilInterface.get_siril_systemdatadir()
+    or get_siril_userdatadir(), joined with "catalogue" (see RESEARCH.md #8, Option C, and
+    SirilBridge.get_system_catalogue_dir()/get_user_catalogue_dir()). This class does not
+    know about sirilpy at all — the caller resolves the path.
     """
 
-    def __init__(self, catalogue_dir: Path):
+    def __init__(self, catalogue_dir: Path, catalog_files: dict[str, str] | None = None):
         self.catalogue_dir = Path(catalogue_dir)
+        self.catalog_files = catalog_files if catalog_files is not None else _LOCAL_CATALOG_FILES
 
     @property
     def available_catalogs(self) -> set[str]:
         return {
             name
-            for name, filename in _LOCAL_CATALOG_FILES.items()
+            for name, filename in self.catalog_files.items()
             if (self.catalogue_dir / filename).is_file()
         }
 
@@ -244,7 +268,7 @@ class LocalCsvProvider(CatalogProvider):
         # reproducible across runs even before CompositeProvider's own dedup priority
         # logic kicks in.
         for catalog in sorted(catalogs, key=default_priority_for_catalog):
-            filename = _LOCAL_CATALOG_FILES.get(catalog)
+            filename = self.catalog_files.get(catalog)
             if not filename:
                 continue
             path = self.catalogue_dir / filename
@@ -308,6 +332,19 @@ class LocalCsvProvider(CatalogProvider):
                 )
             )
         return annotations
+
+
+def count_local_catalog_entries(catalogue_dir: Path, filename: str) -> int:
+    """Row count (excluding header) of a local catalog CSV, or 0 if it doesn't exist.
+    Used by main_window.py to decide the "user_dso" catalog's first-run default: on
+    while Siril's own Annotate-tool catalogue is still a short, deliberately curated
+    list, off once it's grown large enough that defaulting it on for every image would
+    just be clutter (see MainWindow's own default-catalogs logic)."""
+    path = Path(catalogue_dir) / filename
+    if not path.is_file():
+        return 0
+    with open(path, newline="", encoding="utf-8") as fh:
+        return sum(1 for _ in csv.DictReader(fh))
 
 
 # VizieR catalog IDs mirroring siril-scripts/utility/Svenesis-AnnotateImage.py's proven
@@ -787,13 +824,25 @@ class CompositeProvider(CatalogProvider):
                         ann.angular_size = ann.angular_size if ann.angular_size is not None else existing.angular_size
                         kept[kept.index(existing)] = ann
                     else:
-                        # Prefer the richer record (has common_name/object_type/magnitude).
+                        # Prefer the richer record (has common_name/object_type/magnitude)
+                        # but never touch existing.ra/dec/image_x/image_y here -- keeping
+                        # whichever result arrived first is deliberate (see
+                        # _catalog_provider's comment on provider order: Local arrives
+                        # first specifically so its finer position wins this tie).
                         if ann.common_name and not existing.common_name:
                             existing.common_name = ann.common_name
                         if ann.magnitude is not None and existing.magnitude is None:
                             existing.magnitude = ann.magnitude
                         if ann.angular_size is not None and existing.angular_size is None:
                             existing.angular_size = ann.angular_size
+                        # LocalCsvProvider has no real object-type data and sets this to
+                        # the catalog name itself as a placeholder (e.g. "ngc") -- VII/118
+                        # (via VizierProvider) does carry a real NGC2000.0 type code, so
+                        # let it fill that placeholder in without touching position.
+                        existing_type_is_placeholder = existing.object_type in (None, "unknown", existing.catalog)
+                        ann_type_is_real = ann.object_type not in (None, "unknown", ann.catalog)
+                        if ann_type_is_real and existing_type_is_placeholder:
+                            existing.object_type = ann.object_type
                     break
             if not duplicate:
                 kept.append(ann)

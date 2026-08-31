@@ -11,6 +11,7 @@ from siril_modern_annotator.annotation.catalogs import (
     CompositeProvider,
     LocalCsvProvider,
     bayer_designation_to_greek,
+    count_local_catalog_entries,
 )
 from siril_modern_annotator.annotation.models import Annotation
 from siril_modern_annotator.annotation.wcs import SirilWcs
@@ -109,6 +110,51 @@ def test_native_pixel_coordinates_are_populated():
     assert abs(center.image_y - expected_y) < 1.0
 
 
+def test_local_csv_provider_accepts_a_custom_catalog_files_mapping(tmp_path):
+    """Regression test for Siril's own persistent Astrometry > Annotate > Search
+    Object list (user-DSO-catalogue.csv) -- lives in a different directory than the
+    bundled messier/ngc/etc CSVs and under a catalog key ("user_dso") not in the
+    default _LOCAL_CATALOG_FILES mapping, so LocalCsvProvider needs to accept an
+    override rather than always reading the module-level default. Also confirms the
+    real schema's extra pmra/pmdec/bmag columns (proper motion, blue magnitude -- none
+    of which _parse_file reads) don't break parsing."""
+    csv_path = tmp_path / "user-DSO-catalogue.csv"
+    csv_path.write_text(
+        "name,ra,dec,pmra,pmdec,mag,bmag,alias\n"
+        "HD 191765,310.0,41.0,-4.99,-8.445,8.08,8.08,wr134\n"
+    )
+    provider = LocalCsvProvider(tmp_path, catalog_files={"user_dso": "user-DSO-catalogue.csv"})
+    assert provider.available_catalogs == {"user_dso"}
+    results = provider.query(_wcs(), {"user_dso"})
+    assert len(results) == 1
+    assert results[0].catalog == "user_dso"
+    assert results[0].catalog_name == "HD 191765"
+
+
+def test_local_csv_provider_with_custom_mapping_ignores_unmapped_catalogs(tmp_path):
+    csv_path = tmp_path / "user-DSO-catalogue.csv"
+    csv_path.write_text("name,ra,dec,mag,alias\nHD 191765,310.0,41.0,8.08,wr134\n")
+    provider = LocalCsvProvider(tmp_path, catalog_files={"user_dso": "user-DSO-catalogue.csv"})
+    # "messier" isn't in this custom mapping at all -- must not fall back to the
+    # module-level default and must not error.
+    assert provider.query(_wcs(), {"messier"}) == []
+
+
+def test_count_local_catalog_entries_missing_file_returns_zero(tmp_path):
+    assert count_local_catalog_entries(tmp_path, "user-DSO-catalogue.csv") == 0
+
+
+def test_count_local_catalog_entries_counts_data_rows_not_header(tmp_path):
+    csv_path = tmp_path / "user-DSO-catalogue.csv"
+    csv_path.write_text(
+        "name,ra,dec,mag,alias\n"
+        "Object A,10.0,20.0,8.0,\n"
+        "Object B,11.0,21.0,9.0,\n"
+        "Object C,12.0,22.0,10.0,\n"
+    )
+    assert count_local_catalog_entries(tmp_path, "user-DSO-catalogue.csv") == 3
+
+
 def test_composite_provider_merges_and_dedupes():
     provider = CompositeProvider(
         [LocalCsvProvider(_FIXTURES), LocalCsvProvider(_FIXTURES)]
@@ -123,10 +169,14 @@ class _StubProvider(CatalogProvider):
     """Minimal fixed-result provider for testing dedup priority independent of any
     real provider's iteration order."""
 
-    def __init__(self, catalog: str, catalog_name: str, ra: float, dec: float):
+    def __init__(
+        self, catalog: str, catalog_name: str, ra: float, dec: float,
+        object_type: str | None = None, image_x: float = 0.0, image_y: float = 0.0,
+    ):
         self._ann = Annotation(
             catalog=catalog, catalog_name=catalog_name, ra=ra, dec=dec,
-            image_x=0.0, image_y=0.0, priority=0,
+            image_x=image_x, image_y=image_y, priority=0,
+            object_type=object_type if object_type is not None else catalog,
         )
         self._catalog = catalog
 
@@ -187,6 +237,58 @@ def test_dedupe_matches_same_designation_even_when_positions_disagree():
 
     results = provider.query(_wcs(), {"ngc"})
     assert len(results) == 1
+
+
+def test_dedupe_keeps_the_first_arrivals_position_on_a_same_designation_tie():
+    """Regression test for a real screenshot: NGC5471 (a compact HII knot in M101)
+    rendered noticeably off its true position -- root cause was the same as
+    test_dedupe_matches_same_designation_even_when_positions_disagree's bug, one level
+    deeper. Once same-designation dedup correctly recognizes the two results as one
+    object, it still has to pick *which* of the two positions to keep -- and it must
+    keep the precise one (Siril's local CSV), not VII/118's coarse ~30-60" rounded
+    coordinates. _catalog_provider() in main_window.py deliberately queries
+    LocalCsvProvider before VizierProvider so the precise result is always the one
+    dedup sees first; this test locks in that "first arrival wins the position tie"
+    contract directly against CompositeProvider, independent of that wiring."""
+    precise_ra, precise_dec = 211.12041, 54.3975  # Siril's own local ngc.csv for NGC5471
+    imprecise_ra, imprecise_dec = 211.15, 54.4  # VII/118 RAB2000/DEB2000, rounded
+
+    provider = CompositeProvider(
+        [
+            _StubProvider("ngc", "NGC5471", precise_ra, precise_dec, image_x=100.0, image_y=200.0),
+            _StubProvider("ngc", "NGC5471", imprecise_ra, imprecise_dec, image_x=999.0, image_y=999.0),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"ngc"})
+    assert len(results) == 1
+    assert (results[0].ra, results[0].dec) == (precise_ra, precise_dec)
+    assert (results[0].image_x, results[0].image_y) == (100.0, 200.0)
+
+
+def test_dedupe_fills_in_a_real_object_type_without_touching_the_kept_position():
+    """LocalCsvProvider has no real object-type data and sets it to the catalog name
+    itself as a placeholder (see LocalCsvProvider._parse_file); VII/118 does carry a
+    real NGC2000.0 type. When Local's precise result wins the position tie (previous
+    test), its placeholder type must still be backfilled from VII/118's richer record
+    -- without that result's imprecise position leaking through."""
+    provider = CompositeProvider(
+        [
+            _StubProvider(
+                "ngc", "NGC5471", 211.12041, 54.3975,
+                object_type="ngc", image_x=100.0, image_y=200.0,
+            ),
+            _StubProvider(
+                "ngc", "NGC5471", 211.15, 54.4,
+                object_type="HII region", image_x=999.0, image_y=999.0,
+            ),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"ngc"})
+    assert len(results) == 1
+    assert results[0].object_type == "HII region"
+    assert (results[0].image_x, results[0].image_y) == (100.0, 200.0)
 
 
 def test_dedupe_never_merges_a_star_with_a_nearby_nebula():
