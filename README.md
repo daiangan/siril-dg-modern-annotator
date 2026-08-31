@@ -5,6 +5,8 @@ plate-solved astrophotography image into a polished, presentation-quality annota
 image — with draggable labels, automatic collision avoidance, per-catalog colors, full
 typography/marker styling, and full-resolution JPEG/PNG/TIFF export.
 
+**[Website, screenshots, and gallery →](https://daiangan.github.io/siril-dg-modern-annotator/)**
+
 See [RESEARCH.md](RESEARCH.md) for the technical investigation behind this project (the
 `sirilpy` API, prior art in `siril-scripts`, and the catalog/WCS strategy), and
 [ARCHITECTURE.md](ARCHITECTURE.md) for the module layout, data flow, and design
