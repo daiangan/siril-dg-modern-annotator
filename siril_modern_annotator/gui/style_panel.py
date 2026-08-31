@@ -655,6 +655,12 @@ class StylePanel(QWidget):
         controls instead of wherever the Style tab happened to be left."""
         self.tabs.setCurrentIndex(1)
 
+    def show_overlays_tab(self) -> None:
+        """Switches to "Overlays" (index 3 -- see the addTab order above) -- same
+        pattern as show_object_tab, used when clicking the Info Box overlay itself so
+        editing its text is a single click away instead of hunting for this tab."""
+        self.tabs.setCurrentIndex(3)
+
     def set_overlay_settings(self, settings) -> None:
         """Syncs the Overlays tab's widgets from the current OverlaySettings -- called
         once at startup and again after every drag/undo/redo of the compass, so

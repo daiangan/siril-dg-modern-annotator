@@ -196,6 +196,7 @@ class InfoBoxItem(QGraphicsObject):
 
     moved = pyqtSignal(float, float)
     context_menu_requested = pyqtSignal(QPoint)
+    clicked = pyqtSignal()
 
     def __init__(self, style: InfoBoxStyle, image_width: float, image_height: float, text_measurer=None):
         super().__init__()
@@ -255,6 +256,7 @@ class InfoBoxItem(QGraphicsObject):
     def mousePressEvent(self, event):
         # See CompassItem.mousePressEvent -- same bug, same fix.
         if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()  # per user request: jump straight to editing its text
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             super().mousePressEvent(event)
         else:
