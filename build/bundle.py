@@ -24,6 +24,7 @@ on every build.
 from __future__ import annotations
 
 import base64
+import re
 import shutil
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def load_app_icon_png_bytes() -> bytes:
 
 _HEADER_TEMPLATE = '''#!/usr/bin/env python3
 """DG Modern Annotator — single-file build for the Siril Scripts menu.
+Version: {version}
 
 Author: Daian Gan
 Contact and support: daian@ganmedia.com, https://daiangan.com,
@@ -132,10 +134,22 @@ def collect_modules() -> tuple[dict[str, str], list[str]]:
     return modules, packages
 
 
+def _extract_version(modules: dict[str, str]) -> str:
+    # Read from the already-collected __init__.py source text rather than importing
+    # the package, since bundle.py is normally invoked as a standalone script (its own
+    # directory on sys.path, not the repo root) -- an `import siril_modern_annotator`
+    # here would not reliably resolve.
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', modules["siril_modern_annotator"])
+    if match is None:
+        raise RuntimeError("Could not find __version__ in siril_modern_annotator/__init__.py")
+    return match.group(1)
+
+
 def build() -> Path:
     modules, packages = collect_modules()
+    version = _extract_version(modules)
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    content = _HEADER_TEMPLATE.format(modules=modules, packages=packages)
+    content = _HEADER_TEMPLATE.format(modules=modules, packages=packages, version=version)
     OUTPUT_PATH.write_text(content, encoding="utf-8")
     return OUTPUT_PATH
 
