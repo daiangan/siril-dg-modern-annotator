@@ -56,6 +56,27 @@ class ImageInfo:
     telescope: str | None
 
 
+def _format_focal_length(value) -> str:
+    return f"{round(float(value))} mm"
+
+
+def _format_pixel_size(value) -> str:
+    return f"{float(value):.1f} µm"
+
+
+def _format_exposure(value) -> str:
+    """Seconds -> the smallest unit that reads naturally, per user request: under a
+    minute stays in seconds, under an hour becomes minutes, an hour or more becomes
+    hours -- seconds/minutes are whole numbers, hours keep one decimal place."""
+    seconds = float(value)
+    if seconds < 60:
+        return f"{round(seconds)} s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{round(minutes)} m"
+    return f"{seconds / 3600:.1f} h"
+
+
 class SirilBridge:
     """Main-thread-only facade over sirilpy.SirilInterface, exposing exactly what
     Siril Modern Annotator needs (image access, header/WCS-source data, STF/preview,
@@ -198,11 +219,11 @@ class SirilBridge:
         fields = {
             "Camera": _first("instrume"),
             "Telescope": _first("telescop"),
-            "Focal Length": f"{focal_length} mm" if focal_length else None,
+            "Focal Length": _format_focal_length(focal_length) if focal_length else None,
             "Filter": _first("filter"),
-            "Exposure": f"{exposure} s" if exposure else None,
+            "Exposure": _format_exposure(exposure) if exposure else None,
             "Gain": _first("gain"),
-            "Pixel Size": f"{pixel_size} µm" if pixel_size else None,
+            "Pixel Size": _format_pixel_size(pixel_size) if pixel_size else None,
             "Date": _first("date_obs"),
         }
         return {k: str(v) for k, v in fields.items() if v is not None}
