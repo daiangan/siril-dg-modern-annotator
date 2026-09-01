@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, pyqtSignal
+from urllib.parse import quote
+
+from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -12,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QTableView,
@@ -20,6 +24,12 @@ from PyQt6.QtWidgets import (
 )
 
 from ..annotation.models import Annotation, NameDisplayMode
+
+# https://simbad.cds.unistra.fr/Pages/guide/sim-url.htx -- confirmed live: resolves
+# catalog designations directly (M42, NGC5471, IC420, Sh2-155, ...) and Greek-letter
+# Bayer names exactly as this app already displays them (e.g. "ξ Cyg" resolves the
+# same as its Latin transliteration "ksi Cyg").
+_SIMBAD_URL = "https://simbad.cds.unistra.fr/simbad/sim-id?Ident={}"
 
 _COLUMNS = ["Visible", "Object", "Catalog", "Type", "Magnitude", "Size"]
 
@@ -149,6 +159,12 @@ class ObjectPanel(QWidget):
     select_all_requested = pyqtSignal(list)  # annotation ids currently shown in the table
     deselect_all_requested = pyqtSignal(list)  # annotation ids currently shown in the table
     reset_requested = pyqtSignal()
+    # Per user request: mirrors double-clicking a marker/label on the canvas (which
+    # already jumps to the Style panel's "Selected Object" tab) -- a single click here
+    # only selects/highlights (selection_changed above), so double-click was the
+    # natural, already-established gesture for "take me to editing this," rather than
+    # overloading the name with a second, conflicting meaning (see object_id below).
+    object_double_clicked = pyqtSignal(str)  # annotation id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -175,6 +191,9 @@ class ObjectPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setSortingEnabled(True)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_changed)
+        self.table.doubleClicked.connect(self._on_row_double_clicked)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_row_context_menu)
 
         btn_row = QHBoxLayout()
         # Named "Show"/"Hide" rather than "Select"/"Deselect" -- these toggle the
@@ -289,3 +308,26 @@ class ObjectPanel(QWidget):
         source_index = self.proxy.mapToSource(current)
         ann = self.model.annotation_at(source_index.row())
         self.selection_changed.emit(ann.id)
+
+    def _on_row_double_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
+        source_index = self.proxy.mapToSource(index)
+        ann = self.model.annotation_at(source_index.row())
+        self.object_double_clicked.emit(ann.id)
+
+    def _show_row_context_menu(self, pos) -> None:
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        source_index = self.proxy.mapToSource(index)
+        ann = self.model.annotation_at(source_index.row())
+        menu = QMenu(self)
+        # Per user request: not offered for custom (manually-placed) objects -- a
+        # comet, a satellite trail, a typo'd name has no real catalog identifier for
+        # SIMBAD to resolve, unlike every real catalog object's own catalog_name.
+        simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
+        chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if chosen is simbad_action and simbad_action is not None:
+            url = _SIMBAD_URL.format(quote(ann.catalog_name))
+            QDesktopServices.openUrl(QUrl(url))

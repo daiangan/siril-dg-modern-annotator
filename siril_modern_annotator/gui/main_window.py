@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
         self.object_panel.select_all_requested.connect(lambda ids: self._bulk_visibility(ids, True))
         self.object_panel.deselect_all_requested.connect(lambda ids: self._bulk_visibility(ids, False))
         self.object_panel.reset_requested.connect(self._reset_layout)
+        self.object_panel.object_double_clicked.connect(self._on_object_double_clicked)
 
         self.style_panel = StylePanel()
         self.style_panel.set_global_style(self.global_style_holder[0])
