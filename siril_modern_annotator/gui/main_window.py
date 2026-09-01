@@ -760,12 +760,25 @@ class MainWindow(QMainWindow):
     def _setup_overlay_items(self) -> None:
         """Creates (or, on reloading a different image, re-creates against the new
         wcs/image size) the grid/compass/info box scene items. Independent of
-        _rebuild_scene -- those are one-per-Annotation, these are one-per-image."""
+        _rebuild_scene -- those are one-per-Annotation, these are one-per-image.
+
+        Real crash report (macOS crash log, SIGSEGV inside QGraphicsView::paintEvent's
+        item traversal, triggered by a later, unrelated toolbar button click): this
+        used to call removeItem() and immediately overwrite self.grid_item/
+        compass_item/info_box_item, dropping the last Python reference right away.
+        Same known class of PyQt/Qt use-after-free _defer_item_cleanup already exists
+        to guard against for markers/labels/connectors (see its own docstring) --
+        applies just as much here, it just hadn't been wired up for these three items
+        yet. Collect what got removed and hand it to that same deferred-cleanup path
+        instead of letting them be garbage-collected immediately."""
         if self.wcs is None:
             return
+        removed = []
         for item in (self.grid_item, self.compass_item, self.info_box_item):
             if item is not None and item.scene() is not None:
                 item.scene().removeItem(item)
+                removed.append(item)
+        self._defer_item_cleanup(removed)
         self.grid_item = GridItem(self.wcs, self.overlay_settings.grid)
         self.compass_item = CompassItem(self.wcs, self.overlay_settings.compass)
         self.compass_item.moved.connect(self._on_compass_moved)
