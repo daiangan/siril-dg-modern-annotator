@@ -24,18 +24,20 @@ from siril_modern_annotator.gui.commands import MoveMarkerCommand
 _app = QApplication.instance() or QApplication([])
 
 
-def _dragged_annotation(name: str, marker_x: float, marker_y: float) -> Annotation:
+def _dragged_annotation(name: str, marker_x: float, marker_y: float, catalog: str = "messier") -> Annotation:
     return Annotation(
-        catalog="messier", catalog_name=name, ra=10.0, dec=20.0,
+        catalog=catalog, catalog_name=name, ra=10.0, dec=20.0,
         image_x=100.0, image_y=100.0, marker_x=marker_x, marker_y=marker_y,
     )
 
 
 def _reset_markers_as_one_macro(stack: QUndoStack, annotations: list[Annotation], refreshed: list) -> None:
-    """Mirrors _reset_layout's own loop exactly."""
+    """Mirrors _reset_layout's own loop exactly, including skipping custom objects
+    (catalog == "user") -- per user request, they have no independent catalog/WCS
+    position to reset to."""
     stack.beginMacro("Reset Layout")
     for ann in annotations:
-        if ann.marker_x is not None:
+        if ann.catalog != "user" and ann.marker_x is not None:
             old_pos = (ann.marker_x, ann.marker_y)
             stack.push(MoveMarkerCommand(ann, old_pos, (None, None), lambda a=ann: refreshed.append(a.id)))
     stack.endMacro()
@@ -67,6 +69,17 @@ def test_reset_leaves_an_already_catalog_positioned_marker_untouched():
     assert untouched.marker_x is None
     assert refreshed == []
     assert stack.count() == 1
+
+
+def test_reset_skips_a_dragged_custom_object():
+    catalog_obj = _dragged_annotation("M31", 111.0, 222.0)
+    custom_obj = _dragged_annotation("Custom Object", 555.0, 666.0, catalog="user")
+    stack = QUndoStack()
+    refreshed: list = []
+    _reset_markers_as_one_macro(stack, [catalog_obj, custom_obj], refreshed)
+    assert (catalog_obj.marker_x, catalog_obj.marker_y) == (None, None)
+    assert (custom_obj.marker_x, custom_obj.marker_y) == (555.0, 666.0)
+    assert custom_obj.id not in refreshed
 
 
 def test_reset_of_multiple_markers_undoes_as_a_single_combined_step():

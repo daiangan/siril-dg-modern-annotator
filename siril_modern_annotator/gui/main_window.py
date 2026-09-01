@@ -1274,11 +1274,17 @@ class MainWindow(QMainWindow):
         # One combined undo step for the whole button, not two separate ones --
         # run_auto_arrange() pushes its own command, which becomes a child of this
         # macro since it's still open when that runs.
+        #
+        # Custom objects (catalog == "user") are skipped here -- per user request.
+        # They have no independent catalog/WCS position to reset *to*: wherever the
+        # user placed one *is* its position, same as image_x/image_y itself is just
+        # wherever they right-clicked when creating it (see _add_custom_object), not
+        # a verified astrometric source position the way a real catalog object's is.
         if not self.annotations:
             return
         self.undo_stack.beginMacro("Reset Layout")
         for ann in self.annotations:
-            if ann.marker_x is not None:
+            if ann.catalog != "user" and ann.marker_x is not None:
                 old_pos = (ann.marker_x, ann.marker_y)
                 self.undo_stack.push(
                     MoveMarkerCommand(ann, old_pos, (None, None), lambda a=ann: self._refresh_marker_position(a))
