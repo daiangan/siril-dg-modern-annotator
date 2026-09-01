@@ -212,7 +212,20 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_shortcuts()
-        self._load_current_image()
+        # Deferred, not called directly here: modern_annotator.py's main() does
+        # `window = MainWindow(bridge); window.show()`, so anything run synchronously
+        # from inside this constructor -- including the "Loading image..." message and
+        # busy cursor _load_current_image sets right at its own start -- happens before
+        # the window is ever shown, on a widget with nothing on screen to paint yet, so
+        # it's invisible no matter what. Real user report: "I do not see any loading
+        # indicator" (and the wait itself reads as slower, with no visible sign
+        # anything is happening). QTimer.singleShot(0, ...) defers this exactly like
+        # _set_preview_image's fit_to_window call below already does for the same
+        # underlying reason -- runs on the next event-loop tick, right after show()
+        # has actually put the window on screen. _build_ui() doesn't read
+        # image_info/wcs (both stay None until this runs), so nothing here depends on
+        # the image being loaded before the window appears.
+        QTimer.singleShot(0, self._load_current_image)
 
     # ------------------------------------------------------------------ UI setup ----
 
