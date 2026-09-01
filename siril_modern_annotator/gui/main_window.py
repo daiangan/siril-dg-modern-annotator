@@ -17,7 +17,6 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QAction, QDesktopServices, QImage, QKeySequence, QPixmap, QShortcut, QUndoStack
 from PyQt6.QtWidgets import (
-    QApplication,
     QComboBox,
     QDockWidget,
     QFileDialog,
@@ -213,16 +212,14 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_shortcuts()
         # Deferred, not called directly here: modern_annotator.py's main() does
-        # `window = MainWindow(bridge); window.show()`, so anything run synchronously
-        # from inside this constructor -- including the "Loading image..." message and
-        # busy cursor _load_current_image sets right at its own start -- happens before
-        # the window is ever shown, on a widget with nothing on screen to paint yet, so
-        # it's invisible no matter what. Real user report: "I do not see any loading
-        # indicator" (and the wait itself reads as slower, with no visible sign
-        # anything is happening). QTimer.singleShot(0, ...) defers this exactly like
-        # _set_preview_image's fit_to_window call below already does for the same
-        # underlying reason -- runs on the next event-loop tick, right after show()
-        # has actually put the window on screen. _build_ui() doesn't read
+        # `window = MainWindow(bridge); window.show()`, so calling this synchronously
+        # from inside this constructor would run its whole synchronous sirilpy call
+        # chain (pixel data fetch, WCS setup) *before* the window is ever shown --
+        # the user sees nothing at all until it's fully done. QTimer.singleShot(0, ...)
+        # defers this exactly like _set_preview_image's fit_to_window call below
+        # already does for the same underlying reason -- runs on the next event-loop
+        # tick, right after show() has actually put the window on screen, so at least
+        # the window shell itself appears immediately. _build_ui() doesn't read
         # image_info/wcs (both stay None until this runs), so nothing here depends on
         # the image being loaded before the window appears.
         QTimer.singleShot(0, self._load_current_image)
@@ -439,39 +436,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- image loading ----
 
     def _load_current_image(self) -> None:
-        # Per user report: for a big image, everything below (pixel data fetch, WCS
-        # setup, overlay defaults) runs synchronously on the main thread -- sirilpy
-        # calls are main-thread-only (see workers.py's own docstring) -- which can take
-        # several real seconds with no visible sign anything is happening; the toolbar
-        # just sat on a stale "Connecting to Siril...". Set *before* the very first
-        # sirilpy call (is_image_loaded() below) -- a previous version of this fix set
-        # it after that call instead, so if that round-trip itself had any latency the
-        # message still never appeared, reproducing the same "no loading indicator"
-        # report. repaint() forces this one widget to redraw synchronously, right now,
-        # rather than waiting for Qt to get around to it -- a stronger guarantee than
-        # processEvents() alone (kept alongside it, since processEvents() is still what
-        # lets the busy cursor and the rest of the window actually update too).
-        self.connection_label.setText("Loading image…")
-        self.connection_label.repaint()
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        QApplication.processEvents()
         try:
             if not self.bridge.is_image_loaded():
                 QMessageBox.warning(self, "No Image", "No image is currently loaded in Siril.")
                 return
-            # Per user report (macOS showed the spinning-beachball "app not responding"
-            # cursor): a single processEvents() call up top isn't enough on its own --
-            # macOS expects the app to keep pumping its run loop throughout, not just
-            # once before a long stretch of blocking calls, or it concludes the app has
-            # hung even though it's still working. Threading these calls off the main
-            # thread isn't an option (sirilpy has no confirmed thread-safety --
-            # ARCHITECTURE.md's main-thread-only policy), so the real mitigation is
-            # pumping events between each individual sirilpy round-trip below instead
-            # of only around the whole stretch.
             self.image_info = self.bridge.get_image_info()
-            QApplication.processEvents()
             header = self.bridge.get_wcs_header_dict()
-            QApplication.processEvents()
             # Siril's own image_info.plate_solved reflects only its PLTSOLVD FITS
             # keyword -- its own internal "I solved this" bookkeeping flag, not a WCS
             # standard. An image solved by another tool (Astrometry.net, ASTAP,
@@ -502,7 +472,6 @@ class MainWindow(QMainWindow):
                 )
             self.arcsec_per_px = self.wcs.pixel_scale_arcsec_per_px()
             self.icc_profile = self.bridge.get_image_icc_profile()
-            QApplication.processEvents()
             # Label font sizes only -- enabled/color/etc. keep their dataclass defaults
             # (both off). Not gated behind _has_saved_style like global_style_holder
             # below: font/line-width/etc sizing always starts resolution-scaled fresh
@@ -529,7 +498,6 @@ class MainWindow(QMainWindow):
             self.source_identifier = (
                 Path(loaded_filename).stem if loaded_filename else (self.image_info.object_name or "untitled")
             )
-            QApplication.processEvents()
 
             # Marker/label geometry is native-pixel-space (ARCHITECTURE.md #4), so a
             # flat default size looks fine at one resolution and is nearly invisible at
@@ -545,16 +513,6 @@ class MainWindow(QMainWindow):
                 )
             self.style_panel.set_global_style(self.global_style_holder[0])
 
-            # The single biggest blocking call in this whole method for a large image
-            # (fetching the actual pixel array) -- give it its own message rather than
-            # leaving the generic "Loading image..." up for what's likely most of the
-            # real wait, and pump events immediately beforehand so the run loop is as
-            # freshly serviced as possible going into it (can't pump *during* it --
-            # it's one opaque, synchronous sirilpy call, see this method's own comment
-            # on why that call can't move to a background thread).
-            self.connection_label.setText("Loading pixel data…")
-            self.connection_label.repaint()
-            QApplication.processEvents()
             self.refresh_preview_image()
             self.connection_label.setText(
                 f"Connected — {self.image_info.width}×{self.image_info.height}"
@@ -567,8 +525,6 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("Failed to load current image")
             QMessageBox.critical(self, "Siril Modern Annotator", "Unexpected error loading the image; see log.")
-        finally:
-            QApplication.restoreOverrideCursor()
 
     def refresh_preview_image(self, fit: bool = True) -> None:
         """Fetches pixel data per the current preview-mode selection and updates the
@@ -654,6 +610,10 @@ class MainWindow(QMainWindow):
     def _start_catalog_fetch(self, catalogs: set[str]) -> None:
         if self.wcs is None:
             return
+        # Per user request: this table sits empty with no explanation while the
+        # (already background-threaded, non-blocking) initial catalog query runs --
+        # object_panel.set_annotations turns this back off once real results arrive.
+        self.object_panel.set_loading(True)
         self._catalog_worker = CatalogFetchWorker(self._catalog_provider(), self.wcs, catalogs, mag_limit=None)
         self._catalog_worker.progress.connect(lambda msg: self.connection_label.setText(msg))
         self._catalog_worker.succeeded.connect(self._on_catalog_results)
@@ -772,6 +732,10 @@ class MainWindow(QMainWindow):
 
     def _on_catalog_failed(self, message: str) -> None:
         logger.error("Catalog fetch failed: %s", message)
+        # Harmless no-op if this wasn't the initial fetch (the table was already
+        # showing) -- covers the case where the initial query itself fails, which
+        # otherwise leaves the "Loading objects..." placeholder stuck forever.
+        self.object_panel.set_loading(False)
         QMessageBox.warning(
             self, "Catalog Query Failed",
             f"Could not fetch catalog objects (check your internet connection):\n{message}",

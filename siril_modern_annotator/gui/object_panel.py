@@ -10,8 +10,10 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QPushButton,
+    QStackedWidget,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -199,15 +201,35 @@ class ObjectPanel(QWidget):
         filter_row.addWidget(self.search_box, 2)
         filter_row.addWidget(self.catalog_filter, 1)
 
+        # Per user request: while CatalogFetchWorker's background query is still
+        # running (main_window._start_catalog_fetch), this table is just empty --
+        # no visible sign anything is happening. Unlike the image-loading phase
+        # (main-thread-only sirilpy calls, genuinely hard to keep responsive), this
+        # phase already runs off the main thread, so there's no risk of the window
+        # looking frozen here -- a plain swapped-in label is enough.
+        self.loading_label = QLabel("Loading objects…")
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.loading_label.setContentsMargins(0, 24, 0, 0)
+        self.loading_label.setStyleSheet("color: palette(mid);")
+        self.table_stack = QStackedWidget()
+        self.table_stack.addWidget(self.table)
+        self.table_stack.addWidget(self.loading_label)
+
         layout = QVBoxLayout(self)
         layout.addLayout(filter_row)
-        layout.addWidget(self.table)
+        layout.addWidget(self.table_stack)
         layout.addLayout(btn_row)
 
     def set_name_display_mode(self, mode: NameDisplayMode) -> None:
         self.model.set_name_display_mode(mode)
 
+    def set_loading(self, loading: bool) -> None:
+        self.table_stack.setCurrentWidget(self.loading_label if loading else self.table)
+
     def set_annotations(self, annotations: list[Annotation]) -> None:
+        # Results (even zero of them) mean the fetch is over -- always land back on
+        # the table rather than relying on every caller to also call set_loading(False).
+        self.set_loading(False)
         self.model.set_annotations(annotations)
         catalogs = sorted({a.catalog for a in annotations})
         current = self.catalog_filter.currentData()
