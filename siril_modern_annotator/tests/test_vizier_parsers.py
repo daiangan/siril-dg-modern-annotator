@@ -5,7 +5,9 @@ zero rows for every one of these catalogs because none of the real column names/
 matched what it assumed (decimal "ra"/"dec" columns; VII/118 and VII/20 both use
 sexagesimal strings under catalog-specific names, and VII/20 uses a different equinox
 entirely). No network access here -- VizierProvider.query() itself is not covered by
-this offline suite (see README.md); only the row-level parsing logic is.
+this offline suite (see README.md); only the row-level parsing logic is. One
+exception: the query()-level catalog-filtering regression test near the bottom of this
+file, which fully mocks astroquery.vizier.Vizier rather than making a real call.
 
 Note: this module previously also covered SIMBAD common-name resolution
 (resolve_common_names_via_simbad, _best_common_name). That feature was removed after
@@ -20,7 +22,9 @@ from __future__ import annotations
 import pytest
 from astropy.table import Table
 
+from siril_modern_annotator.annotation import catalogs as catalogs_module
 from siril_modern_annotator.annotation.catalogs import (
+    VizierProvider,
     _format_v50_name,
     _run_with_hard_timeout,
     _v50_row_to_annotation,
@@ -108,6 +112,53 @@ def test_vii118_messier_cross_reference_wins_via_desc_field():
     assert ann.catalog_name == "M42"
     assert ann.object_type == "nebula"
     assert ann.angular_size == 66.0
+
+
+# --- VizierProvider.query() -- one exception to this module's "no network" scope: a
+# fully mocked astroquery.vizier.Vizier, so this stays a real unit test rather than a
+# live network call, per the module docstring above.
+
+
+def test_vizier_provider_filters_out_reclassified_catalogs_not_requested(monkeypatch):
+    """Regression test for a real report: with only "messier" checked in the app's
+    Catalogs menu, NGC/IC objects still appeared on the canvas. VII/118 is one combined
+    NGC/IC/Messier catalog -- querying it can't be restricted server-side to just the
+    subset requested, and each row's own catalog is only decided *after* parsing (a
+    Messier cross-ref in Desc promotes a row to "messier", see
+    _vii118_row_to_annotation) -- so query() must filter its results back down to what
+    was actually requested, not return everything VII/118 happens to have in the field."""
+    table = _vii118_table(
+        [
+            # M42, via NGC1976's Desc cross-reference -- classifies as "messier".
+            ["1976", "Nb", "05 35.4", "-05 27", "s", "Ori", "", "66.0", "4.0", "", "!!! theta1 Ori and the great neb; = M42"],
+            # A plain NGC object, no Messier cross-reference at all.
+            ["1924", "Gx", "05 27.9", "-05 19", "r", "Ori", "", "--", "13.0", "p", "vF, pL, iR, st nr"],
+        ]
+    )
+
+    class _FakeVizier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query_region(self, *args, **kwargs):
+            return [table]
+
+    monkeypatch.setattr("astroquery.vizier.Vizier", _FakeVizier)
+    monkeypatch.setattr(catalogs_module, "_vizier_available", True)
+
+    wcs = _wcs_at(83.0, -5.4)  # covers both M42 (83.85, -5.45) and NGC1924 (81.975, -5.3167)
+    provider = VizierProvider()
+
+    messier_only = provider.query(wcs, {"messier"})
+    assert {a.catalog for a in messier_only} == {"messier"}
+    assert {a.catalog_name for a in messier_only} == {"M42"}
+
+    ngc_only = provider.query(wcs, {"ngc"})
+    assert {a.catalog for a in ngc_only} == {"ngc"}
+    assert {a.catalog_name for a in ngc_only} == {"NGC1924"}
+
+    both = provider.query(wcs, {"messier", "ngc"})
+    assert {a.catalog_name for a in both} == {"M42", "NGC1924"}
 
 
 def test_vii118_object_outside_field_is_dropped():

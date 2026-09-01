@@ -692,7 +692,18 @@ class VizierProvider(CatalogProvider):
                 return results
             if not table_list:
                 continue
-            results.extend(self._rows_to_annotations(table_list[0], vizier_id, wcs, mag_limit))
+            parsed = self._rows_to_annotations(table_list[0], vizier_id, wcs, mag_limit)
+            # VII/118 is one combined NGC/IC/Messier catalog -- querying it can't be
+            # restricted server-side to just the messier/ngc/ic subset this caller
+            # actually wants, and each row's *own* catalog (messier vs ngc/ic) is only
+            # decided after parsing (a Messier cross-ref in its Desc field promotes an
+            # NGC/IC row to "messier" -- see _vii118_row_to_annotation). Without this
+            # filter, requesting only "messier" still returned every NGC/IC object VII/
+            # 118 happens to have in the field too -- confirmed by a real screenshot:
+            # NGC/IC markers kept appearing with only Messier checked in the Catalogs
+            # menu. sh2/barnard/bright_star's own vizier ids are each 1:1 with a single
+            # catalog key, so this is a no-op for them either way.
+            results.extend(ann for ann in parsed if ann.catalog in catalogs)
 
         return results
 
