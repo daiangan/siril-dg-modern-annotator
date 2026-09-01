@@ -459,8 +459,19 @@ class MainWindow(QMainWindow):
             if not self.bridge.is_image_loaded():
                 QMessageBox.warning(self, "No Image", "No image is currently loaded in Siril.")
                 return
+            # Per user report (macOS showed the spinning-beachball "app not responding"
+            # cursor): a single processEvents() call up top isn't enough on its own --
+            # macOS expects the app to keep pumping its run loop throughout, not just
+            # once before a long stretch of blocking calls, or it concludes the app has
+            # hung even though it's still working. Threading these calls off the main
+            # thread isn't an option (sirilpy has no confirmed thread-safety --
+            # ARCHITECTURE.md's main-thread-only policy), so the real mitigation is
+            # pumping events between each individual sirilpy round-trip below instead
+            # of only around the whole stretch.
             self.image_info = self.bridge.get_image_info()
+            QApplication.processEvents()
             header = self.bridge.get_wcs_header_dict()
+            QApplication.processEvents()
             # Siril's own image_info.plate_solved reflects only its PLTSOLVD FITS
             # keyword -- its own internal "I solved this" bookkeeping flag, not a WCS
             # standard. An image solved by another tool (Astrometry.net, ASTAP,
@@ -491,6 +502,7 @@ class MainWindow(QMainWindow):
                 )
             self.arcsec_per_px = self.wcs.pixel_scale_arcsec_per_px()
             self.icc_profile = self.bridge.get_image_icc_profile()
+            QApplication.processEvents()
             # Label font sizes only -- enabled/color/etc. keep their dataclass defaults
             # (both off). Not gated behind _has_saved_style like global_style_holder
             # below: font/line-width/etc sizing always starts resolution-scaled fresh
@@ -517,6 +529,7 @@ class MainWindow(QMainWindow):
             self.source_identifier = (
                 Path(loaded_filename).stem if loaded_filename else (self.image_info.object_name or "untitled")
             )
+            QApplication.processEvents()
 
             # Marker/label geometry is native-pixel-space (ARCHITECTURE.md #4), so a
             # flat default size looks fine at one resolution and is nearly invisible at
@@ -532,6 +545,16 @@ class MainWindow(QMainWindow):
                 )
             self.style_panel.set_global_style(self.global_style_holder[0])
 
+            # The single biggest blocking call in this whole method for a large image
+            # (fetching the actual pixel array) -- give it its own message rather than
+            # leaving the generic "Loading image..." up for what's likely most of the
+            # real wait, and pump events immediately beforehand so the run loop is as
+            # freshly serviced as possible going into it (can't pump *during* it --
+            # it's one opaque, synchronous sirilpy call, see this method's own comment
+            # on why that call can't move to a background thread).
+            self.connection_label.setText("Loading pixel data…")
+            self.connection_label.repaint()
+            QApplication.processEvents()
             self.refresh_preview_image()
             self.connection_label.setText(
                 f"Connected — {self.image_info.width}×{self.image_info.height}"
