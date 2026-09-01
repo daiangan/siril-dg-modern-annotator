@@ -17,6 +17,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QAction, QDesktopServices, QImage, QKeySequence, QPixmap, QShortcut, QUndoStack
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDockWidget,
     QFileDialog,
@@ -424,10 +425,23 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- image loading ----
 
     def _load_current_image(self) -> None:
+        # Per user report: for a big image, everything below (pixel data fetch, WCS
+        # setup, overlay defaults) runs synchronously on the main thread -- sirilpy
+        # calls are main-thread-only (see workers.py's own docstring) -- which can take
+        # several real seconds with no visible sign anything is happening; the toolbar
+        # just sat on a stale "Connecting to Siril...". A plain setText() here wouldn't
+        # actually paint before that blocking work runs either: Qt only flushes a
+        # repaint when the event loop gets to process it, and a busy main thread never
+        # does, hence the explicit processEvents() call below. The busy cursor is a
+        # second, cheaper "this is working" signal that survives even if some future
+        # change removes the processEvents() call.
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             if not self.bridge.is_image_loaded():
                 QMessageBox.warning(self, "No Image", "No image is currently loaded in Siril.")
                 return
+            self.connection_label.setText("Loading image…")
+            QApplication.processEvents()
             self.image_info = self.bridge.get_image_info()
             header = self.bridge.get_wcs_header_dict()
             # Siril's own image_info.plate_solved reflects only its PLTSOLVD FITS
@@ -507,6 +521,8 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("Failed to load current image")
             QMessageBox.critical(self, "Siril Modern Annotator", "Unexpected error loading the image; see log.")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def refresh_preview_image(self, fit: bool = True) -> None:
         """Fetches pixel data per the current preview-mode selection and updates the
