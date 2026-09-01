@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QTransform
-from PyQt6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
+from PyQt6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView, QLabel
 
 _ZOOM_FACTOR_BASE = 1.25
 _MIN_SCALE = 0.02
@@ -41,6 +41,22 @@ class ImageView(QGraphicsView):
         self.setMouseTracking(True)
         self.setBackgroundBrush(Qt.GlobalColor.black)
 
+        # Per user report: the small toolbar "Connecting to Siril..."/"Loading
+        # image..." text was too easy to miss against a plain black canvas, especially
+        # for a large image where that canvas stays empty for a while. A plain child
+        # widget (not a scene item) floating over the whole viewport, centered,
+        # visible from construction until the first real set_base_image() call --
+        # unlike the toolbar label, this needs no repaint()/processEvents() trickery
+        # to actually show up, since it's just this widget's normal initial state,
+        # painted during the window's own first ordinary show, well before
+        # _load_current_image's blocking sirilpy calls even start (that method is
+        # deferred via QTimer.singleShot in MainWindow.__init__).
+        self.loading_overlay = QLabel("Loading image…", self)
+        self.loading_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loading_overlay.setStyleSheet("color: #ffffff; font-size: 20px; background: transparent;")
+        self.loading_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.loading_overlay.setGeometry(self.rect())
+
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._native_width = 0
         self._native_height = 0
@@ -69,6 +85,7 @@ class ImageView(QGraphicsView):
             self._pixmap_item.setTransform(QTransform())  # reset before reapplying scale
         self._pixmap_item.setTransform(self._pixmap_item.transform().scale(scale_x, scale_y))
         self.scene_.setSceneRect(QRectF(0, 0, native_width, native_height))
+        self.loading_overlay.hide()
 
     @property
     def native_size(self) -> tuple[int, int]:
@@ -82,6 +99,10 @@ class ImageView(QGraphicsView):
 
     def scene_to_native(self, x: float, y: float) -> tuple[float, float]:
         return x, y
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self.loading_overlay.setGeometry(self.rect())
 
     # --- zoom / pan -----------------------------------------------------------------
 
