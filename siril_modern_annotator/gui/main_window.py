@@ -1265,9 +1265,26 @@ class MainWindow(QMainWindow):
         self.undo_stack.endMacro()
 
     def _reset_layout(self) -> None:
+        # Per user report: this only reset label positions (via run_auto_arrange
+        # below), not markers -- an object dragged off its catalog/WCS position
+        # stayed exactly where it was dragged to. Mirrors _reset_selected_marker_
+        # position's per-object behavior (marker_x/marker_y = None means "use the
+        # catalog/WCS-derived image_x/image_y", per Annotation.effective_marker_
+        # position), just applied to every object instead of just the selected one.
+        # One combined undo step for the whole button, not two separate ones --
+        # run_auto_arrange() pushes its own command, which becomes a child of this
+        # macro since it's still open when that runs.
+        if not self.annotations:
+            return
+        self.undo_stack.beginMacro("Reset Layout")
         for ann in self.annotations:
-            ann.manually_positioned = False
+            if ann.marker_x is not None:
+                old_pos = (ann.marker_x, ann.marker_y)
+                self.undo_stack.push(
+                    MoveMarkerCommand(ann, old_pos, (None, None), lambda a=ann: self._refresh_marker_position(a))
+                )
         self.run_auto_arrange()
+        self.undo_stack.endMacro()
 
     def _hide_selected(self) -> None:
         if self.selected_id is None:
