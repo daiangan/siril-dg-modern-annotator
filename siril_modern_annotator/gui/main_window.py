@@ -443,19 +443,22 @@ class MainWindow(QMainWindow):
         # setup, overlay defaults) runs synchronously on the main thread -- sirilpy
         # calls are main-thread-only (see workers.py's own docstring) -- which can take
         # several real seconds with no visible sign anything is happening; the toolbar
-        # just sat on a stale "Connecting to Siril...". A plain setText() here wouldn't
-        # actually paint before that blocking work runs either: Qt only flushes a
-        # repaint when the event loop gets to process it, and a busy main thread never
-        # does, hence the explicit processEvents() call below. The busy cursor is a
-        # second, cheaper "this is working" signal that survives even if some future
-        # change removes the processEvents() call.
+        # just sat on a stale "Connecting to Siril...". Set *before* the very first
+        # sirilpy call (is_image_loaded() below) -- a previous version of this fix set
+        # it after that call instead, so if that round-trip itself had any latency the
+        # message still never appeared, reproducing the same "no loading indicator"
+        # report. repaint() forces this one widget to redraw synchronously, right now,
+        # rather than waiting for Qt to get around to it -- a stronger guarantee than
+        # processEvents() alone (kept alongside it, since processEvents() is still what
+        # lets the busy cursor and the rest of the window actually update too).
+        self.connection_label.setText("Loading image…")
+        self.connection_label.repaint()
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
         try:
             if not self.bridge.is_image_loaded():
                 QMessageBox.warning(self, "No Image", "No image is currently loaded in Siril.")
                 return
-            self.connection_label.setText("Loading image…")
-            QApplication.processEvents()
             self.image_info = self.bridge.get_image_info()
             header = self.bridge.get_wcs_header_dict()
             # Siril's own image_info.plate_solved reflects only its PLTSOLVD FITS
