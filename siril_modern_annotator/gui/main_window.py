@@ -193,10 +193,11 @@ class MainWindow(QMainWindow):
         self._pending_item_cleanup: list[object] = []
         self.selected_id: str | None = None
 
-        # Grid/compass/info box: off by default every session (per user request) --
-        # unlike global_style/catalog_colors above, deliberately not restored from
-        # last_used_store; re-enabling them is a quick toolbar toggle either way. Only
-        # ever persisted per-image, in a saved project file (see persistence/project.py).
+        # Placeholder only -- _load_current_image() immediately replaces this with
+        # presets.default_overlay_settings_for_image() (resolution-scaled sizing) plus
+        # last_used_store.apply_last_used_overlay_settings() (restored on/off state and
+        # non-size-dependent style, per user request). Also persisted per-image in a
+        # saved project file (see persistence/project.py).
         self.overlay_settings = OverlaySettings()
         self.grid_item: GridItem | None = None
         self.compass_item: CompassItem | None = None
@@ -476,11 +477,17 @@ class MainWindow(QMainWindow):
             self.icc_profile = self.bridge.get_image_icc_profile()
             # Label font sizes only -- enabled/color/etc. keep their dataclass defaults
             # (both off). Not gated behind _has_saved_style like global_style_holder
-            # below: overlay settings are never restored from a previous session (per
-            # user request, always start off), so there's no "last used" size to keep.
+            # below: font/line-width/etc sizing always starts resolution-scaled fresh
+            # for this image, not from a previous session's flat saved number, which
+            # would look wrong at a different resolution.
             self.overlay_settings = preset_store.default_overlay_settings_for_image(
                 self.image_info.width, self.image_info.height
             )
+            # On/off state and non-size-dependent style (color, opacity, label
+            # positions, corner) DO carry over across sessions, per user request --
+            # see apply_last_used_overlay_settings's own docstring for exactly which
+            # fields that is and why the rest is deliberately excluded.
+            self.overlay_settings = last_used_store.apply_last_used_overlay_settings(self.overlay_settings)
             self.overlay_settings.info_box.text = self._default_info_box_text()
             self._setup_overlay_items()
             self.style_panel.set_overlay_settings(self.overlay_settings)
@@ -786,14 +793,17 @@ class MainWindow(QMainWindow):
     def _on_grid_toggled(self, checked: bool) -> None:
         self.overlay_settings.grid.enabled = checked
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_compass_toggled(self, checked: bool) -> None:
         self.overlay_settings.compass.enabled = checked
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_info_box_toggled(self, checked: bool) -> None:
         self.overlay_settings.info_box.enabled = checked
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_overlay_style_edited(self) -> None:
         # No undo tracking, same as catalog color edits (_on_catalog_color_changed) --
@@ -805,6 +815,10 @@ class MainWindow(QMainWindow):
         for key, value in self.style_panel.pending_info_box_style_values().items():
             setattr(self.overlay_settings.info_box, key, value)
         self._refresh_overlays()
+        # Per user request: on/off state and non-size-dependent style (color, opacity,
+        # label positions, corner) should carry over across sessions -- see
+        # apply_last_used_overlay_settings's docstring for exactly which fields.
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_compass_moved(self, new_x: float, new_y: float) -> None:
         style = self.overlay_settings.compass
@@ -1373,6 +1387,7 @@ class MainWindow(QMainWindow):
             self.overlay_settings.compass, fresh_overlays.compass, preserve={"enabled", "anchor_x", "anchor_y"},
         )
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     @staticmethod
     def _apply_overlay_style_fields(target: object, fresh: object, *, preserve: set[str]) -> None:
@@ -1466,9 +1481,15 @@ class MainWindow(QMainWindow):
     def open_export_dialog(self) -> None:
         if self.image_info is None:
             return
-        dialog = ExportDialog(self.image_info.width, self.image_info.height, self)
+        # Per user request: remember export settings (format, resolution mode, quality,
+        # DPI) across sessions -- these don't depend on any one image the way overlay
+        # sizing does, so unlike default_overlay_settings_for_image there's no
+        # resolution-based recompute to defeat by restoring them verbatim.
+        initial = last_used_store.load_last_used_export_settings()
+        dialog = ExportDialog(self.image_info.width, self.image_info.height, self, initial=initial)
         if dialog.exec():
             settings = dialog.export_settings()
+            last_used_store.save_last_used_export_settings(settings)
             self._run_export(settings)
 
     def _run_export(self, settings: ExportSettings) -> None:

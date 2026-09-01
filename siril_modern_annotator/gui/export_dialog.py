@@ -30,7 +30,7 @@ _RESOLUTION_MODES = [
 
 
 class ExportDialog(QDialog):
-    def __init__(self, native_width: int, native_height: int, parent=None):
+    def __init__(self, native_width: int, native_height: int, parent=None, initial: ExportSettings | None = None):
         super().__init__(parent)
         self.setWindowTitle("Export Annotated Image")
         self.native_width = native_width
@@ -85,6 +85,27 @@ class ExportDialog(QDialog):
         self.dpi_spin.setRange(1, 1200)
         self.dpi_spin.setValue(300)
         layout.addRow("DPI (metadata only — does not add pixel detail)", self.dpi_spin)
+
+        # Per user request: remember export settings across sessions. Seeded after
+        # every widget above already exists (setting resolution_mode's index here
+        # fires _on_mode_changed, which needs self.stack fully populated to switch to
+        # the right page). custom_width/height only apply if this image is at least
+        # that big -- clamped by each spinbox's own setRange call above, same as
+        # native_width/height's own defaults would be.
+        if initial is not None:
+            format_index = self.format_combo.findData(initial.format)
+            if format_index >= 0:
+                self.format_combo.setCurrentIndex(format_index)
+            mode_index = self.resolution_mode.findData(initial.resolution_mode)
+            if mode_index >= 0:
+                self.resolution_mode.setCurrentIndex(mode_index)
+            self.scale_spin.setValue(round(initial.scale_percent))
+            if initial.custom_width is not None:
+                self.width_spin.setValue(initial.custom_width)
+            if initial.custom_height is not None:
+                self.height_spin.setValue(initial.custom_height)
+            self.jpeg_quality.setValue(initial.jpeg_quality)
+            self.dpi_spin.setValue(initial.dpi)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
