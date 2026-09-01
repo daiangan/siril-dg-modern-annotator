@@ -192,10 +192,11 @@ class MainWindow(QMainWindow):
         self._pending_item_cleanup: list[object] = []
         self.selected_id: str | None = None
 
-        # Grid/compass/info box: off by default every session (per user request) --
-        # unlike global_style/catalog_colors above, deliberately not restored from
-        # last_used_store; re-enabling them is a quick toolbar toggle either way. Only
-        # ever persisted per-image, in a saved project file (see persistence/project.py).
+        # Placeholder only -- _load_current_image() immediately replaces this with
+        # presets.default_overlay_settings_for_image() (resolution-scaled sizing) plus
+        # last_used_store.apply_last_used_overlay_settings() (restored on/off state and
+        # non-size-dependent style, per user request). Also persisted per-image in a
+        # saved project file (see persistence/project.py).
         self.overlay_settings = OverlaySettings()
         self.grid_item: GridItem | None = None
         self.compass_item: CompassItem | None = None
@@ -210,7 +211,18 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_shortcuts()
-        self._load_current_image()
+        # Deferred, not called directly here: modern_annotator.py's main() does
+        # `window = MainWindow(bridge); window.show()`, so calling this synchronously
+        # from inside this constructor would run its whole synchronous sirilpy call
+        # chain (pixel data fetch, WCS setup) *before* the window is ever shown --
+        # the user sees nothing at all until it's fully done. QTimer.singleShot(0, ...)
+        # defers this exactly like _set_preview_image's fit_to_window call below
+        # already does for the same underlying reason -- runs on the next event-loop
+        # tick, right after show() has actually put the window on screen, so at least
+        # the window shell itself appears immediately. _build_ui() doesn't read
+        # image_info/wcs (both stay None until this runs), so nothing here depends on
+        # the image being loaded before the window appears.
+        QTimer.singleShot(0, self._load_current_image)
 
     # ------------------------------------------------------------------ UI setup ----
 
@@ -462,11 +474,17 @@ class MainWindow(QMainWindow):
             self.icc_profile = self.bridge.get_image_icc_profile()
             # Label font sizes only -- enabled/color/etc. keep their dataclass defaults
             # (both off). Not gated behind _has_saved_style like global_style_holder
-            # below: overlay settings are never restored from a previous session (per
-            # user request, always start off), so there's no "last used" size to keep.
+            # below: font/line-width/etc sizing always starts resolution-scaled fresh
+            # for this image, not from a previous session's flat saved number, which
+            # would look wrong at a different resolution.
             self.overlay_settings = preset_store.default_overlay_settings_for_image(
                 self.image_info.width, self.image_info.height
             )
+            # On/off state and non-size-dependent style (color, opacity, label
+            # positions, corner) DO carry over across sessions, per user request --
+            # see apply_last_used_overlay_settings's own docstring for exactly which
+            # fields that is and why the rest is deliberately excluded.
+            self.overlay_settings = last_used_store.apply_last_used_overlay_settings(self.overlay_settings)
             self.overlay_settings.info_box.text = self._default_info_box_text()
             self._setup_overlay_items()
             self.style_panel.set_overlay_settings(self.overlay_settings)
@@ -592,6 +610,10 @@ class MainWindow(QMainWindow):
     def _start_catalog_fetch(self, catalogs: set[str]) -> None:
         if self.wcs is None:
             return
+        # Per user request: this table sits empty with no explanation while the
+        # (already background-threaded, non-blocking) initial catalog query runs --
+        # object_panel.set_annotations turns this back off once real results arrive.
+        self.object_panel.set_loading(True)
         self._catalog_worker = CatalogFetchWorker(self._catalog_provider(), self.wcs, catalogs, mag_limit=None)
         self._catalog_worker.progress.connect(lambda msg: self.connection_label.setText(msg))
         self._catalog_worker.succeeded.connect(self._on_catalog_results)
@@ -710,6 +732,10 @@ class MainWindow(QMainWindow):
 
     def _on_catalog_failed(self, message: str) -> None:
         logger.error("Catalog fetch failed: %s", message)
+        # Harmless no-op if this wasn't the initial fetch (the table was already
+        # showing) -- covers the case where the initial query itself fails, which
+        # otherwise leaves the "Loading objects..." placeholder stuck forever.
+        self.object_panel.set_loading(False)
         QMessageBox.warning(
             self, "Catalog Query Failed",
             f"Could not fetch catalog objects (check your internet connection):\n{message}",
@@ -770,14 +796,17 @@ class MainWindow(QMainWindow):
     def _on_grid_toggled(self, checked: bool) -> None:
         self.overlay_settings.grid.enabled = checked
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_compass_toggled(self, checked: bool) -> None:
         self.overlay_settings.compass.enabled = checked
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_info_box_toggled(self, checked: bool) -> None:
         self.overlay_settings.info_box.enabled = checked
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_overlay_style_edited(self) -> None:
         # No undo tracking, same as catalog color edits (_on_catalog_color_changed) --
@@ -789,6 +818,10 @@ class MainWindow(QMainWindow):
         for key, value in self.style_panel.pending_info_box_style_values().items():
             setattr(self.overlay_settings.info_box, key, value)
         self._refresh_overlays()
+        # Per user request: on/off state and non-size-dependent style (color, opacity,
+        # label positions, corner) should carry over across sessions -- see
+        # apply_last_used_overlay_settings's docstring for exactly which fields.
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     def _on_compass_moved(self, new_x: float, new_y: float) -> None:
         style = self.overlay_settings.compass
@@ -1232,9 +1265,32 @@ class MainWindow(QMainWindow):
         self.undo_stack.endMacro()
 
     def _reset_layout(self) -> None:
+        # Per user report: this only reset label positions (via run_auto_arrange
+        # below), not markers -- an object dragged off its catalog/WCS position
+        # stayed exactly where it was dragged to. Mirrors _reset_selected_marker_
+        # position's per-object behavior (marker_x/marker_y = None means "use the
+        # catalog/WCS-derived image_x/image_y", per Annotation.effective_marker_
+        # position), just applied to every object instead of just the selected one.
+        # One combined undo step for the whole button, not two separate ones --
+        # run_auto_arrange() pushes its own command, which becomes a child of this
+        # macro since it's still open when that runs.
+        #
+        # Custom objects (catalog == "user") are skipped here -- per user request.
+        # They have no independent catalog/WCS position to reset *to*: wherever the
+        # user placed one *is* its position, same as image_x/image_y itself is just
+        # wherever they right-clicked when creating it (see _add_custom_object), not
+        # a verified astrometric source position the way a real catalog object's is.
+        if not self.annotations:
+            return
+        self.undo_stack.beginMacro("Reset Layout")
         for ann in self.annotations:
-            ann.manually_positioned = False
+            if ann.catalog != "user" and ann.marker_x is not None:
+                old_pos = (ann.marker_x, ann.marker_y)
+                self.undo_stack.push(
+                    MoveMarkerCommand(ann, old_pos, (None, None), lambda a=ann: self._refresh_marker_position(a))
+                )
         self.run_auto_arrange()
+        self.undo_stack.endMacro()
 
     def _hide_selected(self) -> None:
         if self.selected_id is None:
@@ -1357,6 +1413,7 @@ class MainWindow(QMainWindow):
             self.overlay_settings.compass, fresh_overlays.compass, preserve={"enabled", "anchor_x", "anchor_y"},
         )
         self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
     @staticmethod
     def _apply_overlay_style_fields(target: object, fresh: object, *, preserve: set[str]) -> None:
@@ -1450,9 +1507,15 @@ class MainWindow(QMainWindow):
     def open_export_dialog(self) -> None:
         if self.image_info is None:
             return
-        dialog = ExportDialog(self.image_info.width, self.image_info.height, self)
+        # Per user request: remember export settings (format, resolution mode, quality,
+        # DPI) across sessions -- these don't depend on any one image the way overlay
+        # sizing does, so unlike default_overlay_settings_for_image there's no
+        # resolution-based recompute to defeat by restoring them verbatim.
+        initial = last_used_store.load_last_used_export_settings()
+        dialog = ExportDialog(self.image_info.width, self.image_info.height, self, initial=initial)
         if dialog.exec():
             settings = dialog.export_settings()
+            last_used_store.save_last_used_export_settings(settings)
             self._run_export(settings)
 
     def _run_export(self, settings: ExportSettings) -> None:
