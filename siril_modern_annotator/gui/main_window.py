@@ -198,8 +198,17 @@ class MainWindow(QMainWindow):
         # inside a completely unrelated menu's own exec() loop) can still touch a
         # just-removed item. If Python has already destroyed the underlying C++
         # object by then, that's a real, confirmed use-after-free crash (native
-        # SIGABRT/SIGSEGV) -- see _flush_pending_item_cleanup.
-        self._pending_item_cleanup: list[object] = []
+        # SIGABRT/SIGSEGV) -- see _flush_pending_item_cleanup. A list of independent
+        # batches (one per _defer_item_cleanup call), not a flat list of items --
+        # confirmed real crash report: toggling two catalogs off in quick succession
+        # (e.g. WR then NGC) followed by re-toggling one back on crashed on the next
+        # repaint. Root cause was exactly this list being flat: the *first* batch's
+        # 250ms timer cleared the *entire* list when it fired, wiping out the second
+        # batch's protection too -- if the two toggles landed within, say, 50ms of
+        # each other, the second batch's items got barely any of their intended 250ms
+        # before a later repaint could touch them as use-after-free. Each batch now
+        # gets its own timer and clears only itself.
+        self._pending_item_cleanup: list[list[object]] = []
         self.selected_id: str | None = None
 
         # Placeholder only -- _load_current_image() immediately replaces this with
@@ -1046,11 +1055,18 @@ class MainWindow(QMainWindow):
         for this known class of PyQt/PySide issue."""
         if not items:
             return
-        self._pending_item_cleanup.extend(items)
-        QTimer.singleShot(250, self._flush_pending_item_cleanup)
+        self._pending_item_cleanup.append(items)
+        QTimer.singleShot(250, lambda batch=items: self._flush_pending_item_cleanup(batch))
 
-    def _flush_pending_item_cleanup(self) -> None:
-        self._pending_item_cleanup.clear()
+    def _flush_pending_item_cleanup(self, batch: list) -> None:
+        # Drop only this call's own batch -- a different batch queued after this one,
+        # whose own 250ms timer hasn't fired yet, must keep its items alive for its
+        # own full delay (see _pending_item_cleanup's own comment on the real crash
+        # this bug caused).
+        try:
+            self._pending_item_cleanup.remove(batch)
+        except ValueError:
+            pass  # already removed somehow -- nothing left to do
 
     def _update_connector(self, ann: Annotation) -> None:
         connector = self.connector_items.get(ann.id)
