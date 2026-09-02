@@ -12,6 +12,8 @@ from siril_modern_annotator.annotation.catalogs import (
     CatalogProvider,
     CompositeProvider,
     LocalCsvProvider,
+    GumProvider,
+    Sh2CorrectedPositionProvider,
     bayer_designation_to_greek,
     count_local_catalog_entries,
 )
@@ -486,3 +488,163 @@ def test_result_just_past_native_boundary_is_disabled():
     provider = CompositeProvider([_PositionedStubProvider("messier", float(_WIDTH), _HEIGHT / 2)])
     results = provider.query(_wcs(), {"messier"})
     assert results[0].enabled is False
+
+
+# ------------------------------------------------ Sh2CorrectedPositionProvider ----
+# Explicitly experimental (GitHub issue #10 + explicit user request) -- see
+# sh2_corrected_positions.py's own docstring for the confirmed ~15-16 arcmin
+# position-error rationale this addresses.
+
+
+def _wcs_at(center_ra: float, center_dec: float) -> SirilWcs:
+    header = {
+        "NAXIS": 2, "NAXIS1": _WIDTH, "NAXIS2": _HEIGHT,
+        "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN",
+        "CRPIX1": _WIDTH / 2.0, "CRPIX2": _HEIGHT / 2.0,
+        "CRVAL1": center_ra, "CRVAL2": center_dec,
+        "CDELT1": -_PIXEL_SCALE_DEG, "CDELT2": _PIXEL_SCALE_DEG,
+        "CUNIT1": "deg", "CUNIT2": "deg",
+    }
+    return SirilWcs.from_header_dict(header, _WIDTH, _HEIGHT)
+
+
+def test_sh2_corrected_position_provider_only_returns_sh2():
+    provider = Sh2CorrectedPositionProvider()
+    assert provider.available_catalogs == {"sh2"}
+
+
+def test_sh2_corrected_position_provider_ignores_other_catalogs():
+    provider = Sh2CorrectedPositionProvider()
+    assert provider.query(_wcs_at(271.0935, -24.331806), {"messier"}) == []
+
+
+def test_sh2_corrected_position_provider_returns_sh2_25_near_the_lagoon_nebula():
+    # 271.0935, -24.331806 is CORRECTED_SH2_POSITIONS[25] -- the corrected coordinate
+    # itself, live-extracted from the Sharpless column of Kevin Jardine's Integrated
+    # HII Regions catalog (see sh2_corrected_positions.py).
+    provider = Sh2CorrectedPositionProvider()
+    results = provider.query(_wcs_at(271.0935, -24.331806), {"sh2"})
+    names = {a.catalog_name for a in results}
+    assert "Sh2-25" in names
+    sh2_25 = next(a for a in results if a.catalog_name == "Sh2-25")
+    assert sh2_25.catalog == "sh2"
+    assert sh2_25.ra == pytest.approx(271.0935)
+    assert sh2_25.dec == pytest.approx(-24.331806)
+
+
+def test_sh2_corrected_position_provider_object_far_from_frame_is_excluded():
+    provider = Sh2CorrectedPositionProvider()
+    results = provider.query(_wcs_at(0.0, 0.0), {"sh2"})
+    assert not any(a.catalog_name == "Sh2-25" for a in results)
+
+
+def test_sh2_corrected_position_wins_the_dedup_tie_over_the_old_source():
+    """Regression test for the actual mechanism this fix relies on: when the corrected
+    provider and the old (buggy) source both report "Sh2-25" at different positions,
+    CompositeProvider._dedupe's same-designation path must merge them into one marker
+    at the *corrected* provider's position -- exactly the "first arrival wins" rule
+    already established for local-vs-VizieR precision (see _catalog_provider's own
+    comment), since Sh2CorrectedPositionProvider is registered first there."""
+    corrected_ra, corrected_dec = 271.0935, -24.331806  # CORRECTED_SH2_POSITIONS[25]
+    old_buggy_ra, old_buggy_dec = 271.358458, -24.394283  # Siril's own sh2.csv / VII/20 value
+    provider = CompositeProvider(
+        [
+            Sh2CorrectedPositionProvider(),
+            _StubProvider("sh2", "Sh2-25", old_buggy_ra, old_buggy_dec, image_x=999.0, image_y=999.0),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs_at(corrected_ra, corrected_dec), {"sh2"})
+    matches = [a for a in results if a.catalog_name == "Sh2-25"]
+    assert len(matches) == 1
+    assert matches[0].ra == pytest.approx(corrected_ra)
+    assert matches[0].dec == pytest.approx(corrected_dec)
+
+
+def test_sh2_corrected_position_provider_covers_all_312_sharpless_tagged_objects():
+    from siril_modern_annotator.annotation.sh2_corrected_positions import CORRECTED_SH2_POSITIONS
+
+    assert len(CORRECTED_SH2_POSITIONS) == 312
+    assert set(CORRECTED_SH2_POSITIONS) <= set(range(1, 314))  # Sh2 numbers run 1-313
+
+
+# ------------------------------------------------------------------- GumProvider ----
+# Per GitHub issue #10, same source as Sh2CorrectedPositionProvider above -- Gum
+# (1955, southern HII regions) via Kevin Jardine's Integrated HII Regions catalog.
+
+
+def test_gum_provider_only_returns_gum():
+    provider = GumProvider()
+    assert provider.available_catalogs == {"gum"}
+
+
+def test_gum_provider_ignores_other_catalogs():
+    provider = GumProvider()
+    assert provider.query(_wcs_at(131.240583, -41.282917), {"messier"}) == []
+
+
+def test_gum_provider_returns_gum_15():
+    # 131.240583, -41.282917 is GUM_OBJECTS["Gum 15"] -- confirmed live on SIMBAD to
+    # resolve correctly (a real HII region, unlike some letter-suffixed Gum names --
+    # see gum_positions.py's own docstring).
+    provider = GumProvider()
+    results = provider.query(_wcs_at(131.240583, -41.282917), {"gum"})
+    names = {a.catalog_name for a in results}
+    assert "Gum 15" in names
+    gum15 = next(a for a in results if a.catalog_name == "Gum 15")
+    assert gum15.catalog == "gum"
+    assert gum15.object_type == "nebula"
+    assert gum15.ra == pytest.approx(131.240583)
+    assert gum15.dec == pytest.approx(-41.282917)
+    assert gum15.angular_size == pytest.approx(14.0926)
+
+
+def test_gum_provider_object_far_from_frame_is_excluded():
+    provider = GumProvider()
+    results = provider.query(_wcs_at(0.0, 0.0), {"gum"})
+    assert not any(a.catalog_name == "Gum 15" for a in results)
+
+
+def test_gum_provider_covers_all_67_gum_tagged_objects():
+    from siril_modern_annotator.annotation.gum_positions import GUM_OBJECTS
+
+    assert len(GUM_OBJECTS) == 67
+    assert "Gum nebula" in GUM_OBJECTS  # the giant Gum Nebula itself, not "Gum N"
+
+
+def test_gum_merges_with_its_rcw_cross_reference():
+    """Confirmed live before implementing: most Gum objects (47 of 67) already carry
+    an RCW cross-reference for the same physical nebula in Jardine's own data --
+    "gum" joins _DEEP_SKY_CATALOGS (same treatment RCW itself got) so those merge
+    into one marker instead of drawing twice, with RCW's own name winning (RCW's
+    priority is a lower number than Gum's, so it wins regardless of arrival order --
+    unlike Sh2CorrectedPositionProvider's same-catalog tie above, this is a genuine
+    cross-catalog priority decision, not an arrival-order one)."""
+    ra, dec = 271.180792, -23.545944  # GUM_OBJECTS["Gum 74b"], cross-referenced to RCW 146b
+    provider = CompositeProvider(
+        [
+            GumProvider(),
+            _StubProvider("rcw", "RCW 146b", ra, dec),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs_at(ra, dec), {"gum", "rcw"})
+    names = {a.catalog_name for a in results}
+    assert names == {"RCW 146b"}
+
+
+def test_gum_does_not_merge_with_an_unrelated_nearby_star():
+    """A star and an extended object can legitimately share a position without being
+    the same object -- same guard _DEEP_SKY_CATALOGS already provides for every other
+    deep-sky catalog here (see test_dedupe_never_merges_a_star_with_a_nearby_nebula)."""
+    ra, dec = 131.240583, -41.282917
+    provider = CompositeProvider(
+        [
+            GumProvider(),
+            _StubProvider("bright_star", "Test Star", ra, dec),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs_at(ra, dec), {"gum", "bright_star"})
+    names = {a.catalog_name for a in results}
+    assert names == {"Gum 15", "Test Star"}

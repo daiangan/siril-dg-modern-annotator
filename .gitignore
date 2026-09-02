@@ -17,3 +17,6 @@ dist/
 # OS junk (Windows, in case this is ever cloned/edited there)
 Thumbs.db
 desktop.ini
+
+# Claude Code personal settings (not shared with the team/repo)
+.claude/settings.local.json

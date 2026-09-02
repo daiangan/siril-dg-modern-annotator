@@ -342,6 +342,11 @@ CATALOG_PRIORITY: dict[str, int] = {
     # _vii21_row_to_annotation's docstring), so this tier only matters for vdB's own
     # rare same-designation ties.
     "vdb": 27,
+    # Confirmed live: most Gum objects already carry an RCW cross-reference for the
+    # same physical nebula, and RCW is the more commonly cited name for southern HII
+    # regions in modern astrophotography -- Gum only wins the display name when
+    # nothing else (RCW/NGC/Sh2/etc.) covers the same object.
+    "gum": 28,
     "bright_star": 30,
     # A deliberately, individually searched-and-confirmed object (Siril's own
     # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"

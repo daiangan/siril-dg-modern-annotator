@@ -91,6 +91,11 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     # positioned at the *illuminating star*, not a nebula centroid -- see
     # _vii21_row_to_annotation's own docstring.
     "vdb": "van den Bergh Catalogue of Reflection Nebulae (vdB)",
+    # Not VizieR-only like the others above -- GumProvider reads bundled Python data
+    # (gum_positions.py), fully offline, same as messier/ngc/etc.'s local CSVs. See
+    # that module's docstring: not on VizieR at all, so this is a static snapshot of
+    # Kevin Jardine's Integrated HII Regions catalog (galaxymap.org), per issue #10.
+    "gum": "Gum Catalogue of HII Regions (Gum)",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
@@ -114,6 +119,7 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "lbn": "#D9A066",  # soft terracotta/amber
     "rcw": "#D98C9E",  # dusty rose-red
     "vdb": "#8EC6E0",  # soft sky blue -- reflection nebulae scatter blue light
+    "gum": "#E8A87C",  # soft peach/apricot
     "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
@@ -359,6 +365,108 @@ def count_local_catalog_entries(catalogue_dir: Path, filename: str) -> int:
         return 0
     with open(path, newline="", encoding="utf-8") as fh:
         return sum(1 for _ in csv.DictReader(fh))
+
+
+# ----------------------------------------------------------- Sh2CorrectedPositionProvider ----
+# Explicitly experimental, per GitHub issue #10 and explicit user request -- see
+# sh2_corrected_positions.py's own module docstring for the full rationale and the
+# confirmed ~15-16 arcmin position errors this addresses. Self-contained on purpose so
+# it's trivially reversible: this class, its one import below, and its one registration
+# line in gui/main_window.py's _catalog_provider are the entire change.
+
+
+class Sh2CorrectedPositionProvider(CatalogProvider):
+    """Supplies only ra/dec for existing Sh2 designations, from
+    sh2_corrected_positions.CORRECTED_SH2_POSITIONS. Meant to be registered *first* in
+    CompositeProvider's provider list (see gui/main_window.py's _catalog_provider) so
+    its position wins the same-designation dedup tie over Siril's own sh2.csv and
+    VII/20 (see CompositeProvider._dedupe's same_designation path) -- catalog_name/
+    angular_size/etc. still get backfilled from those other sources via the existing
+    merge logic, completely unaffected by this change."""
+
+    @property
+    def available_catalogs(self) -> set[str]:
+        return {"sh2"}
+
+    def query(
+        self,
+        wcs: SirilWcs,
+        catalogs: set[str],
+        mag_limit: float | None = None,
+    ) -> list[Annotation]:
+        from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS
+
+        if "sh2" not in catalogs:
+            return []
+        margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
+        results: list[Annotation] = []
+        for num, (ra, dec) in CORRECTED_SH2_POSITIONS.items():
+            x, y = wcs.world_to_pixel(ra, dec)
+            if not wcs.in_bounds(np.array([x]), np.array([y]), margin_px=margin_px)[0]:
+                continue
+            results.append(
+                Annotation(
+                    catalog="sh2",
+                    catalog_name=f"Sh2-{num}",
+                    ra=ra,
+                    dec=dec,
+                    image_x=float(x),
+                    image_y=float(y),
+                    object_type="nebula",
+                    priority=default_priority_for_catalog("sh2"),
+                )
+            )
+        return results
+
+
+# ----------------------------------------------------------------------- GumProvider ----
+# Per GitHub issue #10, same source as Sh2CorrectedPositionProvider above -- Kevin
+# Jardine's Integrated HII Regions catalog isn't on VizieR, so this is bundled as a
+# static, versioned snapshot of its Gum-tagged rows rather than fetched at runtime. See
+# gum_positions.py's own docstring for the confirmed RCW overlap and the known SIMBAD-
+# link limitation for letter-suffixed names.
+
+
+class GumProvider(CatalogProvider):
+    """Fully offline, like LocalCsvProvider -- reads gum_positions.GUM_OBJECTS, which is
+    plain bundled Python data, never a network call. catalog_name is already the exact
+    display form ("Gum 74b", "Gum nebula", ...) straight from the source data, unlike
+    Sh2CorrectedPositionProvider's reconstructed "Sh2-{num}"."""
+
+    @property
+    def available_catalogs(self) -> set[str]:
+        return {"gum"}
+
+    def query(
+        self,
+        wcs: SirilWcs,
+        catalogs: set[str],
+        mag_limit: float | None = None,
+    ) -> list[Annotation]:
+        from .gum_positions import GUM_OBJECTS
+
+        if "gum" not in catalogs:
+            return []
+        margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
+        results: list[Annotation] = []
+        for name, (ra, dec, angular_size) in GUM_OBJECTS.items():
+            x, y = wcs.world_to_pixel(ra, dec)
+            if not wcs.in_bounds(np.array([x]), np.array([y]), margin_px=margin_px)[0]:
+                continue
+            results.append(
+                Annotation(
+                    catalog="gum",
+                    catalog_name=name,
+                    ra=ra,
+                    dec=dec,
+                    image_x=float(x),
+                    image_y=float(y),
+                    object_type="nebula",
+                    angular_size=angular_size,
+                    priority=default_priority_for_catalog("gum"),
+                )
+            )
+        return results
 
 
 # VizieR catalog IDs mirroring siril-scripts/utility/Svenesis-AnnotateImage.py's proven
@@ -1090,7 +1198,7 @@ class VizierProvider(CatalogProvider):
 # against each other by position (the same object legitimately gets cross-referenced,
 # e.g. M42 == NGC1976), but a star catalog entry never counts as a positional duplicate
 # of anything outside its own catalog.
-_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw"}
+_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw", "gum"}
 
 
 def _same_dedup_class(catalog_a: str, catalog_b: str) -> bool:
