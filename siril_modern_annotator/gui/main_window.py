@@ -43,6 +43,7 @@ from ..annotation.catalogs import (
     CompositeProvider,
     GumProvider,
     LocalCsvProvider,
+    RcwCorrectedPositionProvider,
     Sh2CorrectedPositionProvider,
     VizierProvider,
     count_local_catalog_entries,
@@ -598,13 +599,15 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------- catalog fetching ----
 
     def _catalog_provider(self) -> CompositeProvider:
-        # Sh2CorrectedPositionProvider first, ahead of everything else: explicitly
-        # experimental (GitHub issue #10 + explicit user request), see its own and
-        # sh2_corrected_positions.py's docstrings for the confirmed ~15-16 arcmin
-        # position-error rationale. "First arrival wins the same-designation dedup tie"
-        # (see the comment below) is exactly what makes this work -- delete this one
-        # line (and the two files it references) to fully revert if verification in
-        # Siril doesn't bear this out.
+        # Sh2CorrectedPositionProvider and RcwCorrectedPositionProvider first, ahead of
+        # everything else: explicitly experimental (GitHub issue #10 + explicit user
+        # request for Sh2; RCW added after a confirmed real report of RCW107 landing
+        # ~2.5 arcmin off), see their own and sh2_corrected_positions.py's/
+        # rcw_corrected_positions.py's docstrings for the confirmed position-error
+        # rationale in each case. "First arrival wins the same-designation dedup tie"
+        # (see the comment below) is exactly what makes this work -- delete either
+        # provider's one line (and the two files it references) to fully revert that
+        # one catalog if verification in Siril doesn't bear it out.
         #
         # GumProvider next -- also bundled data from issue #10's same source (see
         # gum_positions.py), but fully offline/permanent (not experimental like the Sh2
@@ -625,6 +628,7 @@ class MainWindow(QMainWindow):
         # via _dedupe's enrichment step.
         providers: list = [
             Sh2CorrectedPositionProvider(),
+            RcwCorrectedPositionProvider(),
             GumProvider(),
             LocalCsvProvider(self.bridge.get_system_catalogue_dir()),
             VizierProvider(),

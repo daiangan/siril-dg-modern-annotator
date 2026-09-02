@@ -13,6 +13,7 @@ from siril_modern_annotator.annotation.catalogs import (
     CompositeProvider,
     LocalCsvProvider,
     GumProvider,
+    RcwCorrectedPositionProvider,
     Sh2CorrectedPositionProvider,
     bayer_designation_to_greek,
     count_local_catalog_entries,
@@ -667,6 +668,76 @@ def test_sh2_corrected_position_provider_covers_all_312_sharpless_tagged_objects
 
     assert len(CORRECTED_SH2_POSITIONS) == 312
     assert set(CORRECTED_SH2_POSITIONS) <= set(range(1, 314))  # Sh2 numbers run 1-313
+
+
+# ------------------------------------------------ RcwCorrectedPositionProvider ----
+# Confirmed real report: a live test with RCW107 showed its marker landing visibly off
+# the actual object -- VII/216 (this app's only other RCW source) stores positions at
+# only minute/arcminute precision, ~2.5 arcmin off for RCW107 specifically. Mirrors
+# Sh2CorrectedPositionProvider exactly; see rcw_corrected_positions.py's own docstring.
+
+
+def test_rcw_corrected_position_provider_only_returns_rcw():
+    provider = RcwCorrectedPositionProvider()
+    assert provider.available_catalogs == {"rcw"}
+
+
+def test_rcw_corrected_position_provider_ignores_other_catalogs():
+    provider = RcwCorrectedPositionProvider()
+    assert provider.query(_wcs_at(248.452458, -48.112861), {"messier"}) == []
+
+
+def test_rcw_corrected_position_provider_returns_rcw_107_near_hd_148937():
+    # 248.452458, -48.112861 is CORRECTED_RCW_POSITIONS[107] -- the corrected
+    # coordinate itself, live-extracted from the rcw column of Kevin Jardine's
+    # Integrated HII Regions catalog (see rcw_corrected_positions.py). Confirmed live
+    # against SIMBAD's own resolution of "RCW 107" to HD 148937 (16 33 52.39,
+    # -48 06 40.5) -- within ~6" of this corrected value, vs. VII/216's own ~2.5
+    # arcmin-off position for the same object.
+    provider = RcwCorrectedPositionProvider()
+    results = provider.query(_wcs_at(248.452458, -48.112861), {"rcw"})
+    names = {a.catalog_name for a in results}
+    assert "RCW 107" in names
+    rcw_107 = next(a for a in results if a.catalog_name == "RCW 107")
+    assert rcw_107.catalog == "rcw"
+    assert rcw_107.ra == pytest.approx(248.452458)
+    assert rcw_107.dec == pytest.approx(-48.112861)
+
+
+def test_rcw_corrected_position_provider_object_far_from_frame_is_excluded():
+    provider = RcwCorrectedPositionProvider()
+    results = provider.query(_wcs_at(0.0, 0.0), {"rcw"})
+    assert not any(a.catalog_name == "RCW 107" for a in results)
+
+
+def test_rcw_corrected_position_wins_the_dedup_tie_over_the_old_source():
+    """Regression test for the actual mechanism this fix relies on: when the corrected
+    provider and the old (VII/216) source both report "RCW 107" at different
+    positions, CompositeProvider._dedupe's same-designation path must merge them into
+    one marker at the *corrected* provider's position -- same "first arrival wins" rule
+    already established for Sh2, since RcwCorrectedPositionProvider is registered first
+    in _catalog_provider."""
+    corrected_ra, corrected_dec = 248.452458, -48.112861  # CORRECTED_RCW_POSITIONS[107]
+    old_vii216_ra, old_vii216_dec = 248.378333, -48.154722  # VII/216's own value
+    provider = CompositeProvider(
+        [
+            RcwCorrectedPositionProvider(),
+            _StubProvider("rcw", "RCW 107", old_vii216_ra, old_vii216_dec, image_x=999.0, image_y=999.0),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs_at(corrected_ra, corrected_dec), {"rcw"})
+    matches = [a for a in results if a.catalog_name == "RCW 107"]
+    assert len(matches) == 1
+    assert matches[0].ra == pytest.approx(corrected_ra)
+    assert matches[0].dec == pytest.approx(corrected_dec)
+
+
+def test_rcw_corrected_position_provider_covers_182_numeric_rcw_designations():
+    from siril_modern_annotator.annotation.rcw_corrected_positions import CORRECTED_RCW_POSITIONS
+
+    assert len(CORRECTED_RCW_POSITIONS) == 182
+    assert set(CORRECTED_RCW_POSITIONS) <= set(range(1, 183))  # RCW numbers run 1-182
 
 
 # ------------------------------------------------------------------- GumProvider ----
