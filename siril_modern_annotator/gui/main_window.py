@@ -85,7 +85,7 @@ from .commands import (
 )
 from .export_dialog import ExportDialog
 from .image_view import ImageView
-from .object_panel import ObjectPanel
+from .object_panel import ObjectPanel, simbad_url_for
 from .style_panel import StylePanel
 from .tools_panel import ToolsPanel
 from .workers import CatalogFetchWorker, ExportWorker
@@ -1333,6 +1333,11 @@ class MainWindow(QMainWindow):
         # Hide above is the correct (and only) way to remove it from view. See
         # DeleteAnnotationCommand's docstring.
         delete_action = menu.addAction(f"Delete {name}") if ann.catalog == "user" else None
+        # Per user request: same "Open in SIMBAD" action as the Objects panel's own
+        # right-click menu (object_panel.py), reusing its exact URL-building logic
+        # rather than a second, drifting copy. Same catalog == "user" exclusion --  a
+        # custom object has no real catalog identifier for SIMBAD to resolve.
+        simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
         # Acting on menu.exec()'s *return value* here, after it returns, rather than
         # on each action's triggered signal (which fires *during* exec()'s own still-
         # active nested event loop) -- real crash report (a full macOS crash log, not
@@ -1358,6 +1363,8 @@ class MainWindow(QMainWindow):
             self._reset_selected_marker_position()
         elif chosen is delete_action:
             self._delete_annotation(ann.id)
+        elif chosen is simbad_action:
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog_name)))
 
     def _on_object_double_clicked(self, annotation_id: str) -> None:
         # Per user request: double-clicking an object on the canvas should land the

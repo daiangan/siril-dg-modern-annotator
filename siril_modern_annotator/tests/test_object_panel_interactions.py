@@ -16,9 +16,15 @@ from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QApplication, QMenu
 
 from siril_modern_annotator.annotation.models import Annotation
-from siril_modern_annotator.gui.object_panel import ObjectPanel
+from siril_modern_annotator.gui.object_panel import ObjectPanel, simbad_url_for
 
 _app = QApplication.instance() or QApplication([])
+
+
+def test_simbad_url_for_a_plain_catalog_name():
+    # Public/standalone (no Qt dependency) specifically so gui/main_window.py's canvas
+    # right-click menu can build the identical link without a second, drifting copy.
+    assert simbad_url_for("M31") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=M31"
 
 
 def _catalog_annotation() -> Annotation:

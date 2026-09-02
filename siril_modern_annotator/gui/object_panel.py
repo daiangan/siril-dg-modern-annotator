@@ -28,8 +28,14 @@ from ..annotation.models import Annotation, NameDisplayMode
 # https://simbad.cds.unistra.fr/Pages/guide/sim-url.htx -- confirmed live: resolves
 # catalog designations directly (M42, NGC5471, IC420, Sh2-155, ...) and Greek-letter
 # Bayer names exactly as this app already displays them (e.g. "ξ Cyg" resolves the
-# same as its Latin transliteration "ksi Cyg").
+# same as its Latin transliteration "ksi Cyg"). Public (not module-private) and
+# standalone (no Qt dependency) so gui/main_window.py's canvas right-click menu can
+# build the exact same link as this panel's, rather than a second, drifting copy.
 _SIMBAD_URL = "https://simbad.cds.unistra.fr/simbad/sim-id?Ident={}"
+
+
+def simbad_url_for(catalog_name: str) -> str:
+    return _SIMBAD_URL.format(quote(catalog_name))
 
 _COLUMNS = ["Visible", "Object", "Catalog", "Type", "Magnitude", "Size"]
 
@@ -329,5 +335,4 @@ class ObjectPanel(QWidget):
         simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is simbad_action and simbad_action is not None:
-            url = _SIMBAD_URL.format(quote(ann.catalog_name))
-            QDesktopServices.openUrl(QUrl(url))
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog_name)))
