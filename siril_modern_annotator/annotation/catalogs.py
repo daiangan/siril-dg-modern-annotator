@@ -96,6 +96,28 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     # that module's docstring: not on VizieR at all, so this is a static snapshot of
     # Kevin Jardine's Integrated HII Regions catalog (galaxymap.org), per issue #10.
     "gum": "Gum Catalogue of HII Regions (Gum)",
+    # Also VizieR-only (VII/192). Every row carries a real NGC/UGC/MCG cross-reference
+    # used as simbad_id -- confirmed live that bare "Arp <n>" is unreliable on SIMBAD
+    # for at least some numbers (a genuine collision with a different Arp catalog).
+    "arp": "Arp's Atlas of Peculiar Galaxies (Arp)",
+    # Also VizieR-only (VII/213). Deliberately excluded from _DEEP_SKY_CATALOGS' cross-
+    # catalog dedup -- see _vii213_row_to_annotation's own docstring/vdB's precedent:
+    # a compact group and one of its member galaxies are conceptually different
+    # objects even when positionally close.
+    "hickson": "Hickson Compact Groups of Galaxies (HCG)",
+    # Also VizieR-only (VII/272).
+    "snr": "Green's Catalogue of Galactic Supernova Remnants (SNR)",
+    # Also VizieR-only (V/163, HASH), filtered to just its Abell-numbered rows -- no
+    # standalone Abell planetary nebula catalog was found on VizieR (unlike every
+    # other catalog here). Confirmed live that bare "Abell <n>" is unreliable on
+    # SIMBAD (collides with Abell's own, much larger galaxy-cluster catalog) --
+    # simbad_id uses the real historical identifier ("PN A66 <n>") instead.
+    "abell": "Abell Catalogue of Planetary Nebulae (Abell)",
+    # Also VizieR-only (III/215). Unlike every catalog above, these are point-source
+    # stars, not extended objects -- same category as bright_star (V/50), not the
+    # deep-sky catalogs, so deliberately excluded from _DEEP_SKY_CATALOGS below (see
+    # _iii215_row_to_annotation's own docstring).
+    "wr": "Catalogue of Galactic Wolf-Rayet Stars (WR)",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
@@ -120,6 +142,11 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "rcw": "#D98C9E",  # dusty rose-red
     "vdb": "#8EC6E0",  # soft sky blue -- reflection nebulae scatter blue light
     "gum": "#E8A87C",  # soft peach/apricot
+    "arp": "#B5B87A",  # muted olive-green
+    "hickson": "#C2A98A",  # soft tan/sand
+    "snr": "#DB8570",  # soft brick-red/orange
+    "abell": "#C9A0DC",  # soft orchid/lilac
+    "wr": "#B8E0D8",  # pale ice-blue/aqua -- evoking these hot blue-white stars
     "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
@@ -481,6 +508,11 @@ _VIZIER_CATALOGS: dict[str, str] = {
     "lbn": "VII/9",
     "rcw": "VII/216",
     "vdb": "VII/21",
+    "arp": "VII/192",
+    "hickson": "VII/213",
+    "snr": "VII/272",
+    "abell": "V/163",
+    "wr": "III/215",
 }
 
 # A catalog with a VizieR ID but no bundled Siril CSV (see _LOCAL_CATALOG_FILES) has no
@@ -859,6 +891,244 @@ def _vii21_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "An
     )
 
 
+def _vii192_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/192 (Webb 1996 update of Arp's 1966 Atlas of Peculiar Galaxies). Real,
+    confirmed schema: the "arpord" sub-table (query_region returns two tables for this
+    ID; astroquery/table_list[0] picks arpord first, confirmed live) has RAJ2000/
+    DEJ2000 already J2000 (RA has seconds, Dec is only DD MM.M -- no seconds -- but
+    Angle parses both fine), Size already arcmin, and -- unlike every other catalog
+    here -- a real cross-reference Name for all 338 rows (confirmed live: zero blanks),
+    always an NGC/UGC/MCG-style designation.
+
+    That Name is used as simbad_id rather than leaving SIMBAD lookup to "Arp <n>"
+    itself: confirmed live that bare "Arp 1" resolves on SIMBAD to an unrelated
+    globular cluster (a genuine naming collision with a different Arp catalog), while
+    "Arp 220"/"Arp 273" resolve correctly -- inconsistent enough across the catalog
+    that the real cross-reference name is the only reliable identifier throughout."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    arp_num = _row_str(row, "Arp")
+    if not arp_num:
+        return None
+    ra_str, dec_str = _row_str(row, "RAJ2000"), _row_str(row, "DEJ2000")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="arp",
+        catalog_name=f"Arp {arp_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="galaxy",
+        angular_size=_safe_float(_row_str(row, "Size")),
+        simbad_id=_row_str(row, "Name") or None,
+        priority=default_priority_for_catalog("arp"),
+    )
+
+
+def _vii213_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/213 (Hickson's Compact Groups of Galaxies, 1982-1994 update)'s "groups"
+    sub-table. Real, confirmed schema: HCG is the catalog's own bare number (1-100);
+    native RA1950/DE1950 are B1950, but VizieR also returns _RA.icrs/_DE.icrs pre-
+    converted, same pattern as Barnard/LBN/RCW. AngSize is arcmin. "HCG <n>" confirmed
+    live to resolve correctly on SIMBAD (e.g. HCG 92 -> Stephan's Quintet) with no
+    identifier fixup needed."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    hcg_num = _row_str(row, "HCG")
+    if not hcg_num:
+        return None
+    ra_str, dec_str = _row_str(row, "_RA.icrs"), _row_str(row, "_DE.icrs")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="hickson",
+        catalog_name=f"HCG {hcg_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="galaxy group",
+        angular_size=_safe_float(_row_str(row, "AngSize")),
+        priority=default_priority_for_catalog("hickson"),
+    )
+
+
+def _vii272_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/272 (Green 2014 -- A Catalogue of Galactic Supernova Remnants). Real,
+    confirmed schema: SNR is the catalog's own designation in Galactic-coordinate form
+    ("GXXX.X+YY.Y") -- RAJ2000/DEJ2000 are already J2000 (mixed precision: RA carries
+    seconds, Dec sometimes only whole arcmin, both parse fine via Angle). Dmaj is the
+    major-axis angular size in arcmin (Dmin, the minor axis, is often masked/missing
+    for a roughly circular remnant -- Dmaj alone matches the single-value angular_size
+    convention already used elsewhere in this module). Confirmed live on SIMBAD: the
+    bare designation ("G000.0+00.0") resolves to the unrelated Galactic Center region
+    marker, not the remnant -- the catalog's own "SNR " prefix ("SNR G000.0+00.0") is
+    required and confirmed live to resolve correctly (to Sgr A East, the actual SNR)."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    designation = _row_str(row, "SNR")
+    if not designation:
+        return None
+    ra_str, dec_str = _row_str(row, "RAJ2000"), _row_str(row, "DEJ2000")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="snr",
+        catalog_name=f"SNR {designation}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="supernova remnant",
+        angular_size=_safe_float(_row_str(row, "Dmaj")),
+        common_name=_row_str(row, "Names") or None,
+        priority=default_priority_for_catalog("snr"),
+    )
+
+
+_ABELL_NAME_RE = re.compile(r"^Abell\s+(\d+)$")
+
+
+def _v163_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """V/163 (HASH -- Hong Kong/AAO/Strasbourg Halpha Planetary Nebula Database,
+    Parker+ 2016), filtered to just its Abell-numbered rows. No standalone VizieR
+    catalog for Abell's 1966 planetary nebula list was found (unlike every other
+    catalog here) -- HASH is the modern, comprehensive PN database that happens to
+    carry "Abell <n>" as a row's own Name whenever that's the object's traditional
+    designation (confirmed live, e.g. Abell 39 at RAJ2000=246.89056/DEJ2000=27.90929),
+    so this queries the whole HASH catalog per field (same as every other catalog
+    query here) and discards every row whose Name isn't "Abell <n>" -- matching the
+    established pattern for VII/118's own post-parse Messier/NGC/IC split.
+
+    RAJ2000/DEJ2000 are already plain J2000 decimal degrees (no sexagesimal parse
+    needed at all, like vdB/Gum). MajDiam is in *arcsec*, unlike every other angular-
+    size column in this module (all arcmin) -- confirmed live via VizieR column units
+    metadata, converted here to stay consistent with the rest of the app.
+
+    Confirmed live on SIMBAD: bare "Abell <n>" is unreliable for the *whole* catalog,
+    not just isolated numbers -- it systematically collides with Abell's own, much
+    larger galaxy-cluster catalog (e.g. "Abell 39"/"Abell 41" both resolve to an
+    unrelated ACO galaxy cluster). The historical catalog identifier SIMBAD actually
+    uses for these planetary nebulae is "PN A66 <n>" (confirmed live to resolve
+    correctly for several numbers), reconstructed here as simbad_id."""
+    name = _row_str(row, "Name")
+    match = _ABELL_NAME_RE.match(name)
+    if not match:
+        return None
+    abell_num = match.group(1)
+    ra, dec = _safe_float(_row_str(row, "RAJ2000")), _safe_float(_row_str(row, "DEJ2000"))
+    if ra is None or dec is None:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    maj_diam_arcsec = _safe_float(_row_str(row, "MajDiam"))
+    return Annotation(
+        catalog="abell",
+        catalog_name=f"Abell {abell_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="planetary nebula",
+        angular_size=maj_diam_arcsec / 60.0 if maj_diam_arcsec is not None else None,
+        simbad_id=f"PN A66 {abell_num}",
+        priority=default_priority_for_catalog("abell"),
+    )
+
+
+def _iii215_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """III/215 (van der Hucht 2001 -- 7th Catalogue of Galactic Wolf-Rayet Stars),
+    "table13" (the position sub-table). Real, confirmed schema: WR is the catalog's
+    own designation (a bare number, sometimes letter-suffixed like "7a" for a star
+    found near an already-numbered one); RAJ2000/DEJ2000 are already J2000 with full
+    seconds precision (no sexagesimal-precision issues or equinox transform needed at
+    all). Name is an occasional HD/HR cross-reference (often blank); Aname is an
+    alternate name, almost always populated (usually a HIP number) -- used as
+    common_name, preferring Name when present since it's the more recognizable
+    designation when available.
+
+    Unlike every nebula/galaxy catalog in this module, these are point-source stars
+    (like the existing bright_star catalog, V/50) -- no angular_size field exists or
+    applies, and this deliberately stays out of _DEEP_SKY_CATALOGS' cross-catalog
+    dedup for the same reason bright_star does: a star can legitimately sit at (or
+    very near) an extended object's cataloged position without being that object --
+    several WR stars are themselves the illuminating star of a nebula they're imaged
+    alongside (e.g. WR136 = the Crescent Nebula/NGC 6888's central star), and merging
+    would hide the star as a distinct, individually meaningful marker.
+
+    "WR <n>" (including letter-suffixed designations) confirmed live to resolve
+    correctly and unambiguously on SIMBAD -- no identifier fixup needed."""
+    wr_num = _row_str(row, "WR")
+    if not wr_num:
+        return None
+    ra_str, dec_str = _row_str(row, "RAJ2000"), _row_str(row, "DEJ2000")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        from astropy import units as u
+        from astropy.coordinates import Angle
+
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    common_name = _row_str(row, "Name") or _row_str(row, "Aname") or None
+    return Annotation(
+        catalog="wr",
+        catalog_name=f"WR {wr_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="Wolf-Rayet star",
+        common_name=common_name,
+        priority=default_priority_for_catalog("wr"),
+    )
+
+
 # One parser per queryable VizieR catalog ID -- replaces a previous generic column-name
 # guesser (colnames.get("ra") or colnames.get("_raj2000") or ...) that silently returned
 # zero rows for every one of these catalogs: real VizieR schemas use sexagesimal-string
@@ -874,6 +1144,11 @@ _VIZIER_ROW_PARSERS = {
     "VII/9": _vii9_row_to_annotation,
     "VII/216": _vii216_row_to_annotation,
     "VII/21": _vii21_row_to_annotation,
+    "VII/192": _vii192_row_to_annotation,
+    "VII/213": _vii213_row_to_annotation,
+    "VII/272": _vii272_row_to_annotation,
+    "V/163": _v163_row_to_annotation,
+    "III/215": _iii215_row_to_annotation,
 }
 
 # Circuit breaker: flips off after the first VizieR connectivity failure and stays off
@@ -1198,7 +1473,9 @@ class VizierProvider(CatalogProvider):
 # against each other by position (the same object legitimately gets cross-referenced,
 # e.g. M42 == NGC1976), but a star catalog entry never counts as a positional duplicate
 # of anything outside its own catalog.
-_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw", "gum"}
+_DEEP_SKY_CATALOGS = {
+    "messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw", "gum", "arp", "snr", "abell",
+}
 
 
 def _same_dedup_class(catalog_a: str, catalog_b: str) -> bool:

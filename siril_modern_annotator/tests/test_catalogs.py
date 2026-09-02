@@ -385,6 +385,25 @@ def test_dedupe_never_merges_a_star_with_a_nearby_nebula():
     assert names == {"sig Sco", "Sh2-9"}
 
 
+def test_dedupe_never_merges_wr_with_a_nearby_nebula():
+    """Same guard as bright_star above, real-world case: WR136 is the actual central
+    star of the Crescent Nebula (NGC 6888) -- a real astrophotography target where the
+    star and the nebula it's blowing into space legitimately share a position without
+    being the same object. WR is deliberately excluded from _DEEP_SKY_CATALOGS for
+    exactly this reason (see _iii215_row_to_annotation's docstring)."""
+    ra, dec = 302.559, 38.355  # WR136/NGC 6888's real position
+    provider = CompositeProvider(
+        [
+            _StubProvider("wr", "WR 136", ra, dec, object_type="Wolf-Rayet star"),
+            _StubProvider("ngc", "NGC6888", ra, dec, object_type="nebula"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"wr", "ngc"})
+    names = {a.catalog_name for a in results}
+    assert names == {"WR 136", "NGC6888"}
+
+
 def test_dedupe_still_merges_same_position_across_deep_sky_catalogs():
     """Deep-sky catalogs (messier/ngc/ic/sh2/ldn) legitimately cross-reference the same
     physical object under different designations (e.g. M42 == NGC1976), so position-
@@ -437,6 +456,88 @@ def test_dedupe_never_merges_vdb_with_a_same_position_ngc_entry():
     results = provider.query(_wcs(), {"vdb", "ngc"})
     names = {a.catalog_name for a in results}
     assert names == {"vdB 20", "NGC1432"}
+
+
+def test_dedupe_merges_arp_with_its_ngc_cross_reference_ngc_name_wins():
+    """Every Arp entry already carries a real NGC/UGC/MCG cross-reference (see
+    _vii192_row_to_annotation) -- Arp 1 is NGC 2857. When both catalogs report the
+    same galaxy at the same position, they must merge into one marker, with NGC's
+    more commonly cited name winning (ngc's priority is lower than arp's)."""
+    ra, dec = 141.16, 49.36
+    provider = CompositeProvider(
+        [
+            _StubProvider("arp", "Arp 1", ra, dec, object_type="galaxy"),
+            _StubProvider("ngc", "NGC2857", ra, dec, object_type="galaxy"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"arp", "ngc"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "NGC2857"
+
+
+def test_dedupe_never_merges_hickson_with_a_same_position_ngc_entry():
+    """Per the same reasoning already established for vdB: a Hickson compact group and
+    one of its individual member galaxies are conceptually different objects even
+    when their catalog positions are close, so Hickson is deliberately left out of
+    the cross-catalog dedup class."""
+    ra, dec = 6.5, 25.72
+    provider = CompositeProvider(
+        [
+            _StubProvider("hickson", "HCG 1", ra, dec, object_type="galaxy group"),
+            _StubProvider("ngc", "NGC7803", ra, dec, object_type="galaxy"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"hickson", "ngc"})
+    names = {a.catalog_name for a in results}
+    assert names == {"HCG 1", "NGC7803"}
+
+
+def test_dedupe_merges_snr_with_its_ngc_cross_reference():
+    """Confirmed live on SIMBAD: many cataloged SNRs share a position with an existing
+    Messier/NGC object (e.g. the Crab Nebula = M1 = NGC 1952) -- SNR joins the same
+    cross-catalog dedup class as RCW/Gum/etc. so they merge into one marker, with the
+    more commonly cited Messier/NGC name winning."""
+    ra, dec = 83.63, 22.01  # M1/Crab Nebula's real position
+    provider = CompositeProvider(
+        [
+            _StubProvider("snr", "SNR G184.6-05.8", ra, dec, object_type="supernova remnant"),
+            _StubProvider("messier", "M1", ra, dec, object_type="nebula"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"snr", "messier"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "M1"
+
+
+def test_dedupe_merges_abell_with_a_same_position_ngc_entry():
+    """Abell joins the same cross-catalog dedup class as SNR/RCW/etc. -- most of
+    Abell's 86 planetary nebulae were previously uncatalogued, but the rare one that
+    does coincide with an existing NGC/IC entry must still merge into one marker."""
+    ra, dec = 246.89056, 27.90929  # Abell 39's real position
+    provider = CompositeProvider(
+        [
+            _StubProvider("abell", "Abell 39", ra, dec, object_type="planetary nebula"),
+            _StubProvider("ngc", "NGC-TEST", ra, dec, object_type="planetary nebula"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"abell", "ngc"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "NGC-TEST"
+
+
+def test_abell_stays_standalone_with_no_overlapping_catalog():
+    ra, dec = 246.89056, 27.90929
+    provider = CompositeProvider(
+        [_StubProvider("abell", "Abell 39", ra, dec, object_type="planetary nebula")],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"abell"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "Abell 39"
 
 
 class _PositionedStubProvider(CatalogProvider):

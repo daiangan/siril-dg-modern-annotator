@@ -324,8 +324,21 @@ CATALOG_PRIORITY: dict[str, int] = {
     # mostly northern-sky), so the two rarely compete for the same object at all, but
     # still need a fixed order for CompositeProvider's dedup.
     "rcw": 16,
+    # One worse than rcw, same reasoning: the Messier/NGC/Sh2/RCW name for a shared
+    # object (e.g. the Veil Nebula as NGC 6960, the Crab as M1) is the one
+    # astrophotographers actually use for it, even when it's also a cataloged SNR.
+    "snr": 17,
     "ic": 20,
     "ngc": 20,
+    # One worse than ic/ngc (not tied) -- every Arp entry already carries a real NGC/
+    # UGC/MCG cross-reference (see _vii192_row_to_annotation), so when the same galaxy
+    # also comes back from VII/118/NGC/IC, that more commonly cited designation wins;
+    # Arp only wins the display name when nothing else covers the same galaxy.
+    "arp": 21,
+    # One worse than arp (not tied) -- most of Abell's 86 planetary nebulae were
+    # previously uncatalogued (that's why Abell found them), so this rarely competes
+    # with anything, but still needs a fixed order for the rare object that does.
+    "abell": 22,
     "ldn": 25,
     # One better than ldn (not tied) so Auto Arrange/dedup have a deterministic winner
     # when the same dark nebula is cataloged in both -- B-numbers (Barnard) are the
@@ -347,7 +360,16 @@ CATALOG_PRIORITY: dict[str, int] = {
     # regions in modern astrophotography -- Gum only wins the display name when
     # nothing else (RCW/NGC/Sh2/etc.) covers the same object.
     "gum": 28,
+    # Never competes with any other catalog for the same on-image label (deliberately
+    # excluded from _DEEP_SKY_CATALOGS' cross-catalog dedup, same reasoning as vdB --
+    # see _vii213_row_to_annotation's docstring), so this tier only matters for
+    # Hickson's own rare same-designation ties.
+    "hickson": 29,
     "bright_star": 30,
+    # A star catalog like bright_star above -- excluded from _DEEP_SKY_CATALOGS' cross-
+    # catalog dedup (see _iii215_row_to_annotation's docstring), so this tier only
+    # matters for WR's own rare same-designation ties.
+    "wr": 31,
     # A deliberately, individually searched-and-confirmed object (Siril's own
     # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"
     # below, this app's own manually-placed custom objects, which stay the highest.

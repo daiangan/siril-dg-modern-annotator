@@ -35,9 +35,14 @@ from siril_modern_annotator.annotation.catalogs import (
     _position_angle_to_screen_rotation_deg,
     _sga2020_row_to_shape,
     _vii21_row_to_annotation,
+    _vii192_row_to_annotation,
+    _vii213_row_to_annotation,
     _vii216_row_to_annotation,
     _vii220a_row_to_annotation,
     _vii237_row_to_shape,
+    _iii215_row_to_annotation,
+    _v163_row_to_annotation,
+    _vii272_row_to_annotation,
     _vii9_row_to_annotation,
     bayer_designation_to_greek,
 )
@@ -502,6 +507,271 @@ def test_vii21_malformed_coordinates_return_none_not_crash():
     )
     wcs = _wcs_at(56.75, 24.12)
     assert _vii21_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- VII/192 (Arp/Webb) -- real rows from a live query near Arp 1/NGC 2857. -----------
+# --- RAJ2000/DEJ2000 are already J2000 (RA has seconds, Dec is only DD MM.M -- no ------
+# --- seconds -- but Angle parses both). Every row carries a real NGC/UGC/MCG cross- ---
+# --- reference, used as simbad_id since bare "Arp <n>" is confirmed unreliable on -----
+# --- SIMBAD for at least some numbers (a collision with a different Arp catalog). -----
+
+_VII192_COLUMNS = ["Arp", "Name", "RAJ2000", "DEJ2000", "Size"]
+
+
+def _vii192_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII192_COLUMNS, dtype=[str, str, str, str, "float32"])
+
+
+def test_vii192_real_row_parses_as_arp():
+    table = _vii192_table([["1", "NGC 2857", "09 24 38", "+49 21.4", 5.2]])
+    wcs = _wcs_at(141.16, 49.36)
+    ann = _vii192_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "arp"
+    assert ann.catalog_name == "Arp 1"
+    assert ann.object_type == "galaxy"
+    assert ann.angular_size == pytest.approx(5.2)
+    assert ann.simbad_id == "NGC 2857"
+    assert ann.ra == pytest.approx(141.16, abs=0.01)
+    assert ann.dec == pytest.approx(49.36, abs=0.01)
+
+
+def test_vii192_missing_size_still_parses():
+    table = _vii192_table([["1", "NGC 2857", "09 24 38", "+49 21.4", float("nan")]])
+    wcs = _wcs_at(141.16, 49.36)
+    ann = _vii192_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.angular_size is None
+
+
+def test_vii192_missing_arp_number_returns_none():
+    table = _vii192_table([["", "NGC 2857", "09 24 38", "+49 21.4", 5.2]])
+    wcs = _wcs_at(141.16, 49.36)
+    assert _vii192_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii192_object_outside_field_is_dropped():
+    table = _vii192_table([["1", "NGC 2857", "09 24 38", "+49 21.4", 5.2]])
+    wcs = _wcs_at(56.75, 24.12)  # Pleiades field -- nowhere near Arp 1
+    assert _vii192_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii192_malformed_coordinates_return_none_not_crash():
+    table = _vii192_table([["1", "NGC 2857", "not-a-coord", "+49 21.4", 5.2]])
+    wcs = _wcs_at(141.16, 49.36)
+    assert _vii192_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- VII/213 (Hickson, groups sub-table) -- real row from a live query near HCG 1. ----
+
+_VII213_COLUMNS = ["HCG", "AngSize", "_RA.icrs", "_DE.icrs"]
+
+
+def _vii213_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII213_COLUMNS, dtype=[str, "float32", str, str])
+
+
+def test_vii213_real_row_parses_as_hickson():
+    table = _vii213_table([["1", 2.9, "00 26 00.2", "+25 43 05"]])
+    wcs = _wcs_at(6.5, 25.72)
+    ann = _vii213_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "hickson"
+    assert ann.catalog_name == "HCG 1"
+    assert ann.object_type == "galaxy group"
+    assert ann.angular_size == pytest.approx(2.9)
+    assert ann.ra == pytest.approx(6.5, abs=0.01)
+    assert ann.dec == pytest.approx(25.72, abs=0.01)
+
+
+def test_vii213_missing_hcg_number_returns_none():
+    table = _vii213_table([["", 2.9, "00 26 00.2", "+25 43 05"]])
+    wcs = _wcs_at(6.5, 25.72)
+    assert _vii213_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii213_object_outside_field_is_dropped():
+    table = _vii213_table([["1", 2.9, "00 26 00.2", "+25 43 05"]])
+    wcs = _wcs_at(141.16, 49.36)  # Arp 1 field -- nowhere near HCG 1
+    assert _vii213_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii213_malformed_coordinates_return_none_not_crash():
+    table = _vii213_table([["1", 2.9, "not-a-coord", "+25 43 05"]])
+    wcs = _wcs_at(6.5, 25.72)
+    assert _vii213_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- VII/272 (Green 2014, SNRs) -- real row from a live query near Sgr A East. --------
+# --- Confirmed live on SIMBAD: the bare designation resolves to the unrelated ---------
+# --- Galactic Center region marker -- the catalog's own "SNR " prefix is required. ----
+
+_VII272_COLUMNS = ["SNR", "RAJ2000", "DEJ2000", "Dmaj", "Names"]
+
+
+def _vii272_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII272_COLUMNS, dtype=[str, str, str, "float32", str])
+
+
+def test_vii272_real_row_parses_as_snr():
+    table = _vii272_table([["G000.0+00.0", "17 45 44", "-29 00", 3.5, "Sgr A East"]])
+    wcs = _wcs_at(266.4333, -29.0)
+    ann = _vii272_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "snr"
+    assert ann.catalog_name == "SNR G000.0+00.0"
+    assert ann.object_type == "supernova remnant"
+    assert ann.angular_size == pytest.approx(3.5)
+    assert ann.common_name == "Sgr A East"
+    assert ann.ra == pytest.approx(266.4333, abs=0.01)
+    assert ann.dec == pytest.approx(-29.0, abs=0.01)
+
+
+def test_vii272_missing_common_name_still_parses():
+    table = _vii272_table([["G000.3+00.0", "17 46 15", "-28 38", 15.0, ""]])
+    wcs = _wcs_at(266.5625, -28.633)
+    ann = _vii272_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog_name == "SNR G000.3+00.0"
+    assert ann.common_name is None
+
+
+def test_vii272_missing_designation_returns_none():
+    table = _vii272_table([["", "17 45 44", "-29 00", 3.5, "Sgr A East"]])
+    wcs = _wcs_at(266.4333, -29.0)
+    assert _vii272_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii272_object_outside_field_is_dropped():
+    table = _vii272_table([["G000.0+00.0", "17 45 44", "-29 00", 3.5, "Sgr A East"]])
+    wcs = _wcs_at(6.5, 25.72)  # HCG 1 field -- nowhere near Sgr A East
+    assert _vii272_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii272_malformed_coordinates_return_none_not_crash():
+    table = _vii272_table([["G000.0+00.0", "not-a-coord", "-29 00", 3.5, "Sgr A East"]])
+    wcs = _wcs_at(266.4333, -29.0)
+    assert _vii272_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- V/163 (HASH), filtered to Abell-numbered rows -- real row from a live query -------
+# --- (Abell 39). RAJ2000/DEJ2000 are already plain decimal degrees; MajDiam is in ------
+# --- *arcsec*, unlike every other angular-size column in this module (all arcmin), -----
+# --- confirmed live via VizieR column units metadata. Confirmed live on SIMBAD: bare ---
+# --- "Abell <n>" collides with Abell's own galaxy-cluster catalog for every number -----
+# --- tried -- "PN A66 <n>" is the real, reliable identifier, used as simbad_id. --------
+
+_V163_COLUMNS = ["Name", "RAJ2000", "DEJ2000", "MajDiam"]
+
+
+def _v163_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_V163_COLUMNS, dtype=[str, "float64", "float64", "float32"])
+
+
+def test_v163_real_row_parses_as_abell():
+    table = _v163_table([["Abell 39", 246.89056, 27.90929, 162.0]])
+    wcs = _wcs_at(246.89056, 27.90929)
+    ann = _v163_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "abell"
+    assert ann.catalog_name == "Abell 39"
+    assert ann.object_type == "planetary nebula"
+    assert ann.simbad_id == "PN A66 39"
+    # 162 arcsec / 60 = 2.7 arcmin
+    assert ann.angular_size == pytest.approx(2.7)
+    assert ann.ra == pytest.approx(246.89056)
+    assert ann.dec == pytest.approx(27.90929)
+
+
+def test_v163_non_abell_row_returns_none():
+    # HASH's own name for most rows -- e.g. real neighboring row "K 6-4" -- must be
+    # silently discarded, same pattern as VII/118's post-parse Messier/NGC/IC split.
+    table = _v163_table([["K 6-4", 264.42886, -27.81932, 6.9]])
+    wcs = _wcs_at(264.42886, -27.81932)
+    assert _v163_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_v163_missing_maj_diam_still_parses():
+    table = _v163_table([["Abell 39", 246.89056, 27.90929, float("nan")]])
+    wcs = _wcs_at(246.89056, 27.90929)
+    ann = _v163_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.angular_size is None
+
+
+def test_v163_object_outside_field_is_dropped():
+    table = _v163_table([["Abell 39", 246.89056, 27.90929, 162.0]])
+    wcs = _wcs_at(6.5, 25.72)  # HCG 1 field -- nowhere near Abell 39
+    assert _v163_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_v163_malformed_coordinates_return_none_not_crash():
+    table = Table(
+        rows=[["Abell 39", "not-a-number", 27.90929, 162.0]],
+        names=_V163_COLUMNS, dtype=[str, str, "float64", "float32"],
+    )
+    wcs = _wcs_at(246.89056, 27.90929)
+    assert _v163_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- III/215 (van der Hucht, Wolf-Rayet stars), table13 sub-table -- real row from a --
+# --- live query (WR 6). Point-source stars, unlike every other catalog here -- no -----
+# --- angular_size at all. "WR <n>" (including letter-suffixed designations) confirmed -
+# --- live to resolve correctly and unambiguously on SIMBAD, no fixup needed. ----------
+
+_III215_COLUMNS = ["WR", "Name", "Aname", "RAJ2000", "DEJ2000"]
+
+
+def _iii215_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_III215_COLUMNS, dtype=[str, str, str, str, str])
+
+
+def test_iii215_real_row_parses_as_wr():
+    table = _iii215_table([["6", "HR 2583", "HIP 33165", "06 54 13.05", "-23 55 42.10"]])
+    wcs = _wcs_at(103.5544, -23.9283)
+    ann = _iii215_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "wr"
+    assert ann.catalog_name == "WR 6"
+    assert ann.object_type == "Wolf-Rayet star"
+    assert ann.common_name == "HR 2583"  # Name preferred over Aname when both present
+    assert ann.angular_size is None  # point source, unlike every nebula/galaxy catalog
+    assert ann.ra == pytest.approx(103.5544, abs=0.01)
+    assert ann.dec == pytest.approx(-23.9283, abs=0.01)
+
+
+def test_iii215_falls_back_to_aname_when_name_is_blank():
+    table = _iii215_table([["1", "", "HIP 3415", "00 43 28.40", "+64 45 35.40"]])
+    wcs = _wcs_at(10.868, 64.7597)
+    ann = _iii215_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.common_name == "HIP 3415"
+
+
+def test_iii215_letter_suffixed_designation_parses():
+    table = _iii215_table([["7a", "PMLC 1", "GSC 6537-0281", "07 20 22.38", "-23 43 57.60"]])
+    wcs = _wcs_at(110.0933, -23.7327)
+    ann = _iii215_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog_name == "WR 7a"
+
+
+def test_iii215_missing_wr_number_returns_none():
+    table = _iii215_table([["", "HR 2583", "HIP 33165", "06 54 13.05", "-23 55 42.10"]])
+    wcs = _wcs_at(103.5544, -23.9283)
+    assert _iii215_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_iii215_object_outside_field_is_dropped():
+    table = _iii215_table([["6", "HR 2583", "HIP 33165", "06 54 13.05", "-23 55 42.10"]])
+    wcs = _wcs_at(246.89056, 27.90929)  # Abell 39 field -- nowhere near WR 6
+    assert _iii215_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_iii215_malformed_coordinates_return_none_not_crash():
+    table = _iii215_table([["6", "HR 2583", "HIP 33165", "not-a-coord", "-23 55 42.10"]])
+    wcs = _wcs_at(103.5544, -23.9283)
+    assert _iii215_row_to_annotation(table[0], wcs, None) is None
 
 
 # --- Galaxy-shape enrichment (SGA2020 primary, VII/237/HyperLeda fallback) ------------

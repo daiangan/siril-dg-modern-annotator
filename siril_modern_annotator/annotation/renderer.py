@@ -30,6 +30,7 @@ from .models import (
     LabelStyle,
     MarkerShape,
     MarkerStyle,
+    NameDisplayMode,
     RaLabelPosition,
     StylePreset,
 )
@@ -189,7 +190,19 @@ def compute_label_geometry(
         color = catalog_colors.get(ann.catalog) if catalog_colors else None
         style = replace(style, background_color=color or _FALLBACK_LABEL_BACKGROUND_COLOR)
     measurer = measurer or default_text_measurer
-    text = ann.display_name(style.name_display)
+    name_display = style.name_display
+    if ann.label_style is None and ann.catalog == "wr":
+        # Per explicit user request: WR objects default to "Catalog then Common"
+        # (e.g. "WR 134 (HIP 99377)") rather than the app-wide CATALOG_ONLY default --
+        # the HD/HR/HIP cross-reference in common_name is often the more recognizable
+        # name for these stars. Deliberately scoped to just this one catalog (not a
+        # new per-catalog setting every catalog gets) and only applies while the user
+        # hasn't manually overridden this specific object's label style (ann.label_
+        # style is still None) -- a real per-object edit in the Style panel's
+        # "Selected Object" tab always wins, same "still fully editable/overridable
+        # afterward" precedence as every other auto-derived per-object property here.
+        name_display = NameDisplayMode.CATALOG_THEN_COMMON
+    text = ann.display_name(name_display)
     w, h = measurer(text, style)
     if ann.label_x is not None and ann.label_y is not None:
         x, y = ann.label_x, ann.label_y
