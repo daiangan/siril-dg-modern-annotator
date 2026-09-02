@@ -978,11 +978,24 @@ class MainWindow(QMainWindow):
     # --------------------------------------------------------------- scene sync ----
 
     def _rebuild_scene(self) -> None:
+        # Route every removed item through _defer_item_cleanup (see its own docstring
+        # for the real native crash reports this exists to prevent) rather than letting
+        # d.clear() drop the last Python reference immediately -- this used to free
+        # every item synchronously with zero grace period, unlike every other removal
+        # path in this file. Confirmed real crash: a SIGSEGV inside QGraphicsView::
+        # paintEvent with no toolbar-click frame on the stack at all, i.e. a plain
+        # queued repaint touching an item _rebuild_scene had already destroyed moments
+        # earlier (e.g. loading a project, or the initial catalog query completing,
+        # while a previous scene's items were still live).
+        removed_items = []
         for d in (self.marker_items, self.label_items, self.connector_items):
             for item in d.values():
                 if item.scene() is not None:
+                    item.setVisible(False)
                     item.scene().removeItem(item)
+                    removed_items.append(item)
             d.clear()
+        self._defer_item_cleanup(removed_items)
         for ann in self.annotations:
             self._add_scene_items_for(ann)
 
