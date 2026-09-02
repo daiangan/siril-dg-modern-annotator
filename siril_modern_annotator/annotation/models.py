@@ -303,6 +303,11 @@ class Annotation:
 CATALOG_PRIORITY: dict[str, int] = {
     "messier": 10,
     "sh2": 15,
+    # One worse than sh2 (not tied) for a deterministic winner on the rare object
+    # cataloged in both -- RCW is the southern-hemisphere counterpart to Sh2 (which is
+    # mostly northern-sky), so the two rarely compete for the same object at all, but
+    # still need a fixed order for CompositeProvider's dedup.
+    "rcw": 16,
     "ic": 20,
     "ngc": 20,
     "ldn": 25,
@@ -316,6 +321,11 @@ CATALOG_PRIORITY: dict[str, int] = {
     # are the ones astrophotographers actually use, so LBN only wins the display name
     # when nothing else covers the same object.
     "lbn": 26,
+    # Never competes with any other catalog for the same on-image label (deliberately
+    # excluded from _DEEP_SKY_CATALOGS' cross-catalog dedup -- see
+    # _vii21_row_to_annotation's docstring), so this tier only matters for vdB's own
+    # rare same-designation ties.
+    "vdb": 27,
     "bright_star": 30,
     # A deliberately, individually searched-and-confirmed object (Siril's own
     # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"
