@@ -113,6 +113,11 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     # SIMBAD (collides with Abell's own, much larger galaxy-cluster catalog) --
     # simbad_id uses the real historical identifier ("PN A66 <n>") instead.
     "abell": "Abell Catalogue of Planetary Nebulae (Abell)",
+    # Also VizieR-only (III/215). Unlike every catalog above, these are point-source
+    # stars, not extended objects -- same category as bright_star (V/50), not the
+    # deep-sky catalogs, so deliberately excluded from _DEEP_SKY_CATALOGS below (see
+    # _iii215_row_to_annotation's own docstring).
+    "wr": "Catalogue of Galactic Wolf-Rayet Stars (WR)",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
@@ -141,6 +146,7 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "hickson": "#C2A98A",  # soft tan/sand
     "snr": "#DB8570",  # soft brick-red/orange
     "abell": "#C9A0DC",  # soft orchid/lilac
+    "wr": "#B8E0D8",  # pale ice-blue/aqua -- evoking these hot blue-white stars
     "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
@@ -506,6 +512,7 @@ _VIZIER_CATALOGS: dict[str, str] = {
     "hickson": "VII/213",
     "snr": "VII/272",
     "abell": "V/163",
+    "wr": "III/215",
 }
 
 # A catalog with a VizieR ID but no bundled Siril CSV (see _LOCAL_CATALOG_FILES) has no
@@ -1067,6 +1074,61 @@ def _v163_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Ann
     )
 
 
+def _iii215_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """III/215 (van der Hucht 2001 -- 7th Catalogue of Galactic Wolf-Rayet Stars),
+    "table13" (the position sub-table). Real, confirmed schema: WR is the catalog's
+    own designation (a bare number, sometimes letter-suffixed like "7a" for a star
+    found near an already-numbered one); RAJ2000/DEJ2000 are already J2000 with full
+    seconds precision (no sexagesimal-precision issues or equinox transform needed at
+    all). Name is an occasional HD/HR cross-reference (often blank); Aname is an
+    alternate name, almost always populated (usually a HIP number) -- used as
+    common_name, preferring Name when present since it's the more recognizable
+    designation when available.
+
+    Unlike every nebula/galaxy catalog in this module, these are point-source stars
+    (like the existing bright_star catalog, V/50) -- no angular_size field exists or
+    applies, and this deliberately stays out of _DEEP_SKY_CATALOGS' cross-catalog
+    dedup for the same reason bright_star does: a star can legitimately sit at (or
+    very near) an extended object's cataloged position without being that object --
+    several WR stars are themselves the illuminating star of a nebula they're imaged
+    alongside (e.g. WR136 = the Crescent Nebula/NGC 6888's central star), and merging
+    would hide the star as a distinct, individually meaningful marker.
+
+    "WR <n>" (including letter-suffixed designations) confirmed live to resolve
+    correctly and unambiguously on SIMBAD -- no identifier fixup needed."""
+    wr_num = _row_str(row, "WR")
+    if not wr_num:
+        return None
+    ra_str, dec_str = _row_str(row, "RAJ2000"), _row_str(row, "DEJ2000")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        from astropy import units as u
+        from astropy.coordinates import Angle
+
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    common_name = _row_str(row, "Name") or _row_str(row, "Aname") or None
+    return Annotation(
+        catalog="wr",
+        catalog_name=f"WR {wr_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="Wolf-Rayet star",
+        common_name=common_name,
+        priority=default_priority_for_catalog("wr"),
+    )
+
+
 # One parser per queryable VizieR catalog ID -- replaces a previous generic column-name
 # guesser (colnames.get("ra") or colnames.get("_raj2000") or ...) that silently returned
 # zero rows for every one of these catalogs: real VizieR schemas use sexagesimal-string
@@ -1086,6 +1148,7 @@ _VIZIER_ROW_PARSERS = {
     "VII/213": _vii213_row_to_annotation,
     "VII/272": _vii272_row_to_annotation,
     "V/163": _v163_row_to_annotation,
+    "III/215": _iii215_row_to_annotation,
 }
 
 # Circuit breaker: flips off after the first VizieR connectivity failure and stays off

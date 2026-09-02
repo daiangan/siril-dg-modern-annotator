@@ -366,6 +366,10 @@ CATALOG_PRIORITY: dict[str, int] = {
     # Hickson's own rare same-designation ties.
     "hickson": 29,
     "bright_star": 30,
+    # A star catalog like bright_star above -- excluded from _DEEP_SKY_CATALOGS' cross-
+    # catalog dedup (see _iii215_row_to_annotation's docstring), so this tier only
+    # matters for WR's own rare same-designation ties.
+    "wr": 31,
     # A deliberately, individually searched-and-confirmed object (Siril's own
     # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"
     # below, this app's own manually-placed custom objects, which stay the highest.

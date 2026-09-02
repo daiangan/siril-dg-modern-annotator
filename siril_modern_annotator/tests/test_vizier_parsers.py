@@ -40,6 +40,7 @@ from siril_modern_annotator.annotation.catalogs import (
     _vii216_row_to_annotation,
     _vii220a_row_to_annotation,
     _vii237_row_to_shape,
+    _iii215_row_to_annotation,
     _v163_row_to_annotation,
     _vii272_row_to_annotation,
     _vii9_row_to_annotation,
@@ -711,6 +712,66 @@ def test_v163_malformed_coordinates_return_none_not_crash():
     )
     wcs = _wcs_at(246.89056, 27.90929)
     assert _v163_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- III/215 (van der Hucht, Wolf-Rayet stars), table13 sub-table -- real row from a --
+# --- live query (WR 6). Point-source stars, unlike every other catalog here -- no -----
+# --- angular_size at all. "WR <n>" (including letter-suffixed designations) confirmed -
+# --- live to resolve correctly and unambiguously on SIMBAD, no fixup needed. ----------
+
+_III215_COLUMNS = ["WR", "Name", "Aname", "RAJ2000", "DEJ2000"]
+
+
+def _iii215_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_III215_COLUMNS, dtype=[str, str, str, str, str])
+
+
+def test_iii215_real_row_parses_as_wr():
+    table = _iii215_table([["6", "HR 2583", "HIP 33165", "06 54 13.05", "-23 55 42.10"]])
+    wcs = _wcs_at(103.5544, -23.9283)
+    ann = _iii215_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "wr"
+    assert ann.catalog_name == "WR 6"
+    assert ann.object_type == "Wolf-Rayet star"
+    assert ann.common_name == "HR 2583"  # Name preferred over Aname when both present
+    assert ann.angular_size is None  # point source, unlike every nebula/galaxy catalog
+    assert ann.ra == pytest.approx(103.5544, abs=0.01)
+    assert ann.dec == pytest.approx(-23.9283, abs=0.01)
+
+
+def test_iii215_falls_back_to_aname_when_name_is_blank():
+    table = _iii215_table([["1", "", "HIP 3415", "00 43 28.40", "+64 45 35.40"]])
+    wcs = _wcs_at(10.868, 64.7597)
+    ann = _iii215_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.common_name == "HIP 3415"
+
+
+def test_iii215_letter_suffixed_designation_parses():
+    table = _iii215_table([["7a", "PMLC 1", "GSC 6537-0281", "07 20 22.38", "-23 43 57.60"]])
+    wcs = _wcs_at(110.0933, -23.7327)
+    ann = _iii215_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog_name == "WR 7a"
+
+
+def test_iii215_missing_wr_number_returns_none():
+    table = _iii215_table([["", "HR 2583", "HIP 33165", "06 54 13.05", "-23 55 42.10"]])
+    wcs = _wcs_at(103.5544, -23.9283)
+    assert _iii215_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_iii215_object_outside_field_is_dropped():
+    table = _iii215_table([["6", "HR 2583", "HIP 33165", "06 54 13.05", "-23 55 42.10"]])
+    wcs = _wcs_at(246.89056, 27.90929)  # Abell 39 field -- nowhere near WR 6
+    assert _iii215_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_iii215_malformed_coordinates_return_none_not_crash():
+    table = _iii215_table([["6", "HR 2583", "HIP 33165", "not-a-coord", "-23 55 42.10"]])
+    wcs = _wcs_at(103.5544, -23.9283)
+    assert _iii215_row_to_annotation(table[0], wcs, None) is None
 
 
 # --- Galaxy-shape enrichment (SGA2020 primary, VII/237/HyperLeda fallback) ------------

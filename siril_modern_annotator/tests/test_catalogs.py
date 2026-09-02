@@ -385,6 +385,25 @@ def test_dedupe_never_merges_a_star_with_a_nearby_nebula():
     assert names == {"sig Sco", "Sh2-9"}
 
 
+def test_dedupe_never_merges_wr_with_a_nearby_nebula():
+    """Same guard as bright_star above, real-world case: WR136 is the actual central
+    star of the Crescent Nebula (NGC 6888) -- a real astrophotography target where the
+    star and the nebula it's blowing into space legitimately share a position without
+    being the same object. WR is deliberately excluded from _DEEP_SKY_CATALOGS for
+    exactly this reason (see _iii215_row_to_annotation's docstring)."""
+    ra, dec = 302.559, 38.355  # WR136/NGC 6888's real position
+    provider = CompositeProvider(
+        [
+            _StubProvider("wr", "WR 136", ra, dec, object_type="Wolf-Rayet star"),
+            _StubProvider("ngc", "NGC6888", ra, dec, object_type="nebula"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"wr", "ngc"})
+    names = {a.catalog_name for a in results}
+    assert names == {"WR 136", "NGC6888"}
+
+
 def test_dedupe_still_merges_same_position_across_deep_sky_catalogs():
     """Deep-sky catalogs (messier/ngc/ic/sh2/ldn) legitimately cross-reference the same
     physical object under different designations (e.g. M42 == NGC1976), so position-
