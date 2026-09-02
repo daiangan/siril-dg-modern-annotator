@@ -12,7 +12,7 @@ from siril_modern_annotator.annotation.catalogs import (
     ONLINE_ONLY_CATALOGS,
     SUPPORTED_CATALOGS,
 )
-from siril_modern_annotator.annotation.models import Annotation, LabelStyle, MarkerStyle, StylePreset
+from siril_modern_annotator.annotation.models import Annotation, LabelStyle, MarkerStyle, NameDisplayMode, StylePreset
 from siril_modern_annotator.annotation.renderer import (
     compute_label_geometry,
     compute_marker_geometry,
@@ -204,3 +204,67 @@ def test_label_background_color_does_not_mutate_shared_global_style():
     style = StylePreset(name="test")
     compute_label_geometry(ann, style, catalog_colors={"messier": "#F2C572"})
     assert style.label_style.background_color is None
+
+
+# --- WR default name display: "Catalog then Common" (e.g. "WR 134 (HIP 99377)"), -----
+# --- per explicit user request -- scoped to just this one catalog, not a general -----
+# --- per-catalog setting every catalog gets. See compute_label_geometry's own ---------
+# --- comment for why this lives there rather than baked into a per-object ------------
+# --- label_style at catalog-fetch time (that would clobber every other label_style ---
+# --- field with flat defaults, the same class of bug already fixed once this ---------
+# --- session for galaxy shape data and marker_style). ---------------------------------
+
+
+def _wr_ann(common_name: str | None = "HIP 99377", label_style=None) -> Annotation:
+    return Annotation(
+        catalog="wr", catalog_name="WR 134", common_name=common_name,
+        ra=0.0, dec=0.0, image_x=100.0, image_y=100.0, label_style=label_style,
+    )
+
+
+def test_wr_object_defaults_to_catalog_then_common():
+    ann = _wr_ann()
+    style = StylePreset(name="test")  # global default stays CATALOG_ONLY, untouched
+    geo = compute_label_geometry(ann, style)
+    assert geo.text == "WR 134 (HIP 99377)"
+    # The global preset's own name_display is never mutated by this per-catalog default.
+    assert style.label_style.name_display is NameDisplayMode.CATALOG_ONLY
+
+
+def test_wr_object_falls_back_to_catalog_only_without_a_common_name():
+    ann = _wr_ann(common_name=None)
+    style = StylePreset(name="test")
+    geo = compute_label_geometry(ann, style)
+    assert geo.text == "WR 134"
+
+
+def test_non_wr_object_is_unaffected_by_the_wr_default():
+    ann = Annotation(
+        catalog="messier", catalog_name="M31", common_name="Andromeda Galaxy",
+        ra=0.0, dec=0.0, image_x=100.0, image_y=100.0,
+    )
+    style = StylePreset(name="test")
+    geo = compute_label_geometry(ann, style)
+    assert geo.text == "M31"  # global default (CATALOG_ONLY), not "M31 (Andromeda Galaxy)"
+
+
+def test_wr_default_is_overridden_by_a_real_per_object_label_style():
+    """Per explicit user decision: fully editable/overridable afterward, same
+    precedence as every other auto-derived per-object property in this app -- a real
+    per-object label_style (the user manually editing this object's style) always
+    wins over the WR-specific default."""
+    override = LabelStyle(name_display=NameDisplayMode.COMMON_ONLY)
+    ann = _wr_ann(label_style=override)
+    style = StylePreset(name="test")
+    geo = compute_label_geometry(ann, style)
+    assert geo.text == "HIP 99377"
+
+
+def test_wr_default_is_overridden_by_catalog_only_explicitly_chosen_per_object():
+    """Even choosing the *same* mode the app-wide default already uses, once it's a
+    real per-object override, must win over the WR-specific auto-default."""
+    override = LabelStyle(name_display=NameDisplayMode.CATALOG_ONLY)
+    ann = _wr_ann(label_style=override)
+    style = StylePreset(name="test")
+    geo = compute_label_geometry(ann, style)
+    assert geo.text == "WR 134"
