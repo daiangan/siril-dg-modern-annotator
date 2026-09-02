@@ -40,6 +40,7 @@ from siril_modern_annotator.annotation.catalogs import (
     _vii216_row_to_annotation,
     _vii220a_row_to_annotation,
     _vii237_row_to_shape,
+    _v163_row_to_annotation,
     _vii272_row_to_annotation,
     _vii9_row_to_annotation,
     bayer_designation_to_greek,
@@ -650,6 +651,66 @@ def test_vii272_malformed_coordinates_return_none_not_crash():
     table = _vii272_table([["G000.0+00.0", "not-a-coord", "-29 00", 3.5, "Sgr A East"]])
     wcs = _wcs_at(266.4333, -29.0)
     assert _vii272_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- V/163 (HASH), filtered to Abell-numbered rows -- real row from a live query -------
+# --- (Abell 39). RAJ2000/DEJ2000 are already plain decimal degrees; MajDiam is in ------
+# --- *arcsec*, unlike every other angular-size column in this module (all arcmin), -----
+# --- confirmed live via VizieR column units metadata. Confirmed live on SIMBAD: bare ---
+# --- "Abell <n>" collides with Abell's own galaxy-cluster catalog for every number -----
+# --- tried -- "PN A66 <n>" is the real, reliable identifier, used as simbad_id. --------
+
+_V163_COLUMNS = ["Name", "RAJ2000", "DEJ2000", "MajDiam"]
+
+
+def _v163_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_V163_COLUMNS, dtype=[str, "float64", "float64", "float32"])
+
+
+def test_v163_real_row_parses_as_abell():
+    table = _v163_table([["Abell 39", 246.89056, 27.90929, 162.0]])
+    wcs = _wcs_at(246.89056, 27.90929)
+    ann = _v163_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "abell"
+    assert ann.catalog_name == "Abell 39"
+    assert ann.object_type == "planetary nebula"
+    assert ann.simbad_id == "PN A66 39"
+    # 162 arcsec / 60 = 2.7 arcmin
+    assert ann.angular_size == pytest.approx(2.7)
+    assert ann.ra == pytest.approx(246.89056)
+    assert ann.dec == pytest.approx(27.90929)
+
+
+def test_v163_non_abell_row_returns_none():
+    # HASH's own name for most rows -- e.g. real neighboring row "K 6-4" -- must be
+    # silently discarded, same pattern as VII/118's post-parse Messier/NGC/IC split.
+    table = _v163_table([["K 6-4", 264.42886, -27.81932, 6.9]])
+    wcs = _wcs_at(264.42886, -27.81932)
+    assert _v163_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_v163_missing_maj_diam_still_parses():
+    table = _v163_table([["Abell 39", 246.89056, 27.90929, float("nan")]])
+    wcs = _wcs_at(246.89056, 27.90929)
+    ann = _v163_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.angular_size is None
+
+
+def test_v163_object_outside_field_is_dropped():
+    table = _v163_table([["Abell 39", 246.89056, 27.90929, 162.0]])
+    wcs = _wcs_at(6.5, 25.72)  # HCG 1 field -- nowhere near Abell 39
+    assert _v163_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_v163_malformed_coordinates_return_none_not_crash():
+    table = Table(
+        rows=[["Abell 39", "not-a-number", 27.90929, 162.0]],
+        names=_V163_COLUMNS, dtype=[str, str, "float64", "float32"],
+    )
+    wcs = _wcs_at(246.89056, 27.90929)
+    assert _v163_row_to_annotation(table[0], wcs, None) is None
 
 
 # --- Galaxy-shape enrichment (SGA2020 primary, VII/237/HyperLeda fallback) ------------

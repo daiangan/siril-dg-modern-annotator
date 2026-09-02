@@ -335,6 +335,10 @@ CATALOG_PRIORITY: dict[str, int] = {
     # also comes back from VII/118/NGC/IC, that more commonly cited designation wins;
     # Arp only wins the display name when nothing else covers the same galaxy.
     "arp": 21,
+    # One worse than arp (not tied) -- most of Abell's 86 planetary nebulae were
+    # previously uncatalogued (that's why Abell found them), so this rarely competes
+    # with anything, but still needs a fixed order for the rare object that does.
+    "abell": 22,
     "ldn": 25,
     # One better than ldn (not tied) so Auto Arrange/dedup have a deterministic winner
     # when the same dark nebula is cataloged in both -- B-numbers (Barnard) are the

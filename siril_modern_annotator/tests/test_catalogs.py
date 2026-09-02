@@ -493,6 +493,34 @@ def test_dedupe_merges_snr_with_its_ngc_cross_reference():
     assert results[0].catalog_name == "M1"
 
 
+def test_dedupe_merges_abell_with_a_same_position_ngc_entry():
+    """Abell joins the same cross-catalog dedup class as SNR/RCW/etc. -- most of
+    Abell's 86 planetary nebulae were previously uncatalogued, but the rare one that
+    does coincide with an existing NGC/IC entry must still merge into one marker."""
+    ra, dec = 246.89056, 27.90929  # Abell 39's real position
+    provider = CompositeProvider(
+        [
+            _StubProvider("abell", "Abell 39", ra, dec, object_type="planetary nebula"),
+            _StubProvider("ngc", "NGC-TEST", ra, dec, object_type="planetary nebula"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"abell", "ngc"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "NGC-TEST"
+
+
+def test_abell_stays_standalone_with_no_overlapping_catalog():
+    ra, dec = 246.89056, 27.90929
+    provider = CompositeProvider(
+        [_StubProvider("abell", "Abell 39", ra, dec, object_type="planetary nebula")],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"abell"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "Abell 39"
+
+
 class _PositionedStubProvider(CatalogProvider):
     """Returns one fixed-position Annotation, bypassing real WCS projection -- lets a
     test place a result exactly in-frame or out-of-frame without needing real sky

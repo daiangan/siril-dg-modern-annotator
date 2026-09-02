@@ -107,6 +107,12 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     "hickson": "Hickson Compact Groups of Galaxies (HCG)",
     # Also VizieR-only (VII/272).
     "snr": "Green's Catalogue of Galactic Supernova Remnants (SNR)",
+    # Also VizieR-only (V/163, HASH), filtered to just its Abell-numbered rows -- no
+    # standalone Abell planetary nebula catalog was found on VizieR (unlike every
+    # other catalog here). Confirmed live that bare "Abell <n>" is unreliable on
+    # SIMBAD (collides with Abell's own, much larger galaxy-cluster catalog) --
+    # simbad_id uses the real historical identifier ("PN A66 <n>") instead.
+    "abell": "Abell Catalogue of Planetary Nebulae (Abell)",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
@@ -134,6 +140,7 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "arp": "#B5B87A",  # muted olive-green
     "hickson": "#C2A98A",  # soft tan/sand
     "snr": "#DB8570",  # soft brick-red/orange
+    "abell": "#C9A0DC",  # soft orchid/lilac
     "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
@@ -498,6 +505,7 @@ _VIZIER_CATALOGS: dict[str, str] = {
     "arp": "VII/192",
     "hickson": "VII/213",
     "snr": "VII/272",
+    "abell": "V/163",
 }
 
 # A catalog with a VizieR ID but no bundled Siril CSV (see _LOCAL_CATALOG_FILES) has no
@@ -1006,6 +1014,59 @@ def _vii272_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "A
     )
 
 
+_ABELL_NAME_RE = re.compile(r"^Abell\s+(\d+)$")
+
+
+def _v163_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """V/163 (HASH -- Hong Kong/AAO/Strasbourg Halpha Planetary Nebula Database,
+    Parker+ 2016), filtered to just its Abell-numbered rows. No standalone VizieR
+    catalog for Abell's 1966 planetary nebula list was found (unlike every other
+    catalog here) -- HASH is the modern, comprehensive PN database that happens to
+    carry "Abell <n>" as a row's own Name whenever that's the object's traditional
+    designation (confirmed live, e.g. Abell 39 at RAJ2000=246.89056/DEJ2000=27.90929),
+    so this queries the whole HASH catalog per field (same as every other catalog
+    query here) and discards every row whose Name isn't "Abell <n>" -- matching the
+    established pattern for VII/118's own post-parse Messier/NGC/IC split.
+
+    RAJ2000/DEJ2000 are already plain J2000 decimal degrees (no sexagesimal parse
+    needed at all, like vdB/Gum). MajDiam is in *arcsec*, unlike every other angular-
+    size column in this module (all arcmin) -- confirmed live via VizieR column units
+    metadata, converted here to stay consistent with the rest of the app.
+
+    Confirmed live on SIMBAD: bare "Abell <n>" is unreliable for the *whole* catalog,
+    not just isolated numbers -- it systematically collides with Abell's own, much
+    larger galaxy-cluster catalog (e.g. "Abell 39"/"Abell 41" both resolve to an
+    unrelated ACO galaxy cluster). The historical catalog identifier SIMBAD actually
+    uses for these planetary nebulae is "PN A66 <n>" (confirmed live to resolve
+    correctly for several numbers), reconstructed here as simbad_id."""
+    name = _row_str(row, "Name")
+    match = _ABELL_NAME_RE.match(name)
+    if not match:
+        return None
+    abell_num = match.group(1)
+    ra, dec = _safe_float(_row_str(row, "RAJ2000")), _safe_float(_row_str(row, "DEJ2000"))
+    if ra is None or dec is None:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    maj_diam_arcsec = _safe_float(_row_str(row, "MajDiam"))
+    return Annotation(
+        catalog="abell",
+        catalog_name=f"Abell {abell_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="planetary nebula",
+        angular_size=maj_diam_arcsec / 60.0 if maj_diam_arcsec is not None else None,
+        simbad_id=f"PN A66 {abell_num}",
+        priority=default_priority_for_catalog("abell"),
+    )
+
+
 # One parser per queryable VizieR catalog ID -- replaces a previous generic column-name
 # guesser (colnames.get("ra") or colnames.get("_raj2000") or ...) that silently returned
 # zero rows for every one of these catalogs: real VizieR schemas use sexagesimal-string
@@ -1024,6 +1085,7 @@ _VIZIER_ROW_PARSERS = {
     "VII/192": _vii192_row_to_annotation,
     "VII/213": _vii213_row_to_annotation,
     "VII/272": _vii272_row_to_annotation,
+    "V/163": _v163_row_to_annotation,
 }
 
 # Circuit breaker: flips off after the first VizieR connectivity failure and stays off
@@ -1348,7 +1410,9 @@ class VizierProvider(CatalogProvider):
 # against each other by position (the same object legitimately gets cross-referenced,
 # e.g. M42 == NGC1976), but a star catalog entry never counts as a positional duplicate
 # of anything outside its own catalog.
-_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw", "gum", "arp", "snr"}
+_DEEP_SKY_CATALOGS = {
+    "messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw", "gum", "arp", "snr", "abell",
+}
 
 
 def _same_dedup_class(catalog_a: str, catalog_b: str) -> bool:
