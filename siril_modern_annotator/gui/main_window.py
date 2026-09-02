@@ -192,23 +192,28 @@ class MainWindow(QMainWindow):
         self.marker_items: dict[str, MarkerItem] = {}
         self.label_items: dict[str, LabelItem] = {}
         self.connector_items: dict[str, ConnectorItem] = {}
-        # Items just removed from the scene (see _remove_scene_items_for), kept alive
-        # here briefly rather than dropped immediately. QGraphicsScene.removeItem()
-        # detaches an item, but its own internal index/paint bookkeeping isn't always
-        # fully settled by the time it returns -- a later repaint (even one nested
-        # inside a completely unrelated menu's own exec() loop) can still touch a
-        # just-removed item. If Python has already destroyed the underlying C++
-        # object by then, that's a real, confirmed use-after-free crash (native
-        # SIGABRT/SIGSEGV) -- see _flush_pending_item_cleanup. A list of independent
-        # batches (one per _defer_item_cleanup call), not a flat list of items --
-        # confirmed real crash report: toggling two catalogs off in quick succession
-        # (e.g. WR then NGC) followed by re-toggling one back on crashed on the next
-        # repaint. Root cause was exactly this list being flat: the *first* batch's
-        # 250ms timer cleared the *entire* list when it fired, wiping out the second
-        # batch's protection too -- if the two toggles landed within, say, 50ms of
-        # each other, the second batch's items got barely any of their intended 250ms
-        # before a later repaint could touch them as use-after-free. Each batch now
-        # gets its own timer and clears only itself.
+        # Items just removed from the scene (see _remove_scene_items_for and every
+        # other _defer_item_cleanup call site), kept alive here for the rest of the
+        # session rather than dropped. QGraphicsScene.removeItem() detaches an item,
+        # but the scene's own internal spatial index isn't necessarily fully rebuilt by
+        # the time it returns -- a later repaint, triggered by something completely
+        # unrelated to the item itself (an unrelated toolbar click, or an ordinary
+        # repaint while dragging a *different* item), can still walk that index and
+        # touch a just-removed item. If Python has already destroyed the underlying
+        # C++ object by then, that's a real, confirmed use-after-free crash (multiple
+        # native SIGABRT/SIGSEGV crash reports, all inside QGraphicsView::paintEvent's
+        # item traversal) -- see _defer_item_cleanup's own docstring.
+        #
+        # This used to release each batch after a fixed 250ms timer. That was not
+        # enough: crash reports kept recurring specifically while the user was also
+        # dragging a label, which floods the event queue with geometry-change/repaint
+        # events -- under that load a repaint queued *before* removal can still be
+        # processed *after* the 250ms timer already freed the item. No fixed delay is
+        # provably safe against an arbitrarily backed-up event queue, so batches are no
+        # longer auto-flushed at all -- they stay here, permanently, for the life of
+        # the session. These are lightweight item wrappers and a session only
+        # accumulates a small, bounded number of them, so the memory cost is
+        # negligible next to the alternative (a real, user-facing crash).
         self._pending_item_cleanup: list[list[object]] = []
         self.selected_id: str | None = None
 
@@ -1064,32 +1069,41 @@ class MainWindow(QMainWindow):
         self._defer_item_cleanup(removed)
 
     def _defer_item_cleanup(self, items: list) -> None:
-        """Keeps just-removed scene items alive for a short delay instead of letting
-        Python's refcounting destroy their underlying C++ objects the instant this
-        function returns. Confirmed real, reproducible crash otherwise (two separate
-        native crash reports: SIGABRT "Pure virtual function called!" in
-        QGraphicsItemPrivate::effectiveBoundingRect, and a SIGSEGV/pointer-
-        authentication use-after-free in QGraphicsItem::topLevelItem -- both inside
+        """Keeps just-removed scene items alive for the rest of the session instead of
+        letting Python's refcounting destroy their underlying C++ objects the instant
+        this function returns. Confirmed real, reproducible crashes otherwise (native
+        crash reports: SIGABRT "Pure virtual function called!" in
+        QGraphicsItemPrivate::effectiveBoundingRect, and repeated SIGSEGV/pointer-
+        authentication use-after-frees in QGraphicsItem::topLevelItem -- all inside
         QGraphicsView::paintEvent's item traversal). QGraphicsScene.removeItem()
-        detaches an item, but the scene's own internal index/paint bookkeeping isn't
-        necessarily fully settled the instant it returns; a *later* repaint --
-        including one nested inside a completely unrelated menu's own exec() loop,
-        e.g. right-clicking empty space shortly after a delete -- can still touch a
-        just-removed item. If the C++ object is already gone by then, that's a
-        use-after-free. Holding a Python reference a little longer, released only
-        after a short delay (giving Qt's event loop several iterations to fully
-        process any pending paint/index cleanup first), is the standard mitigation
-        for this known class of PyQt/PySide issue."""
+        detaches an item, but the scene's own internal spatial index isn't necessarily
+        fully rebuilt the instant it returns -- a *later* repaint, even one triggered
+        by something totally unrelated to the item (an unrelated toolbar click, empty-
+        space right-click, or just an ordinary repaint while dragging a different
+        item), can still walk that index and touch a just-removed item. If the C++
+        object is already gone by then, that's a use-after-free.
+
+        This used to hold items only for a fixed 250ms via QTimer.singleShot before
+        releasing them, on the assumption that gave Qt's event loop enough iterations
+        to finish any pending paint/index work first. That assumption doesn't hold
+        under load: real crash reports kept recurring specifically while the user was
+        also dragging a label (which floods the event queue with geometry-change/
+        repaint events), where the backlog can easily exceed 250ms and a repaint still
+        queued from *before* the timer fired ends up processed *after* it. There is no
+        fixed delay that is provably long enough. Since these are lightweight item
+        wrappers and a session only ever accumulates a bounded, small number of them
+        (each catalog toggle or delete adds a handful), the only fully safe fix is to
+        never let Python free them for the life of the session at all -- see
+        _pending_item_cleanup's own comment."""
         if not items:
             return
         self._pending_item_cleanup.append(items)
-        QTimer.singleShot(250, lambda batch=items: self._flush_pending_item_cleanup(batch))
 
     def _flush_pending_item_cleanup(self, batch: list) -> None:
-        # Drop only this call's own batch -- a different batch queued after this one,
-        # whose own 250ms timer hasn't fired yet, must keep its items alive for its
-        # own full delay (see _pending_item_cleanup's own comment on the real crash
-        # this bug caused).
+        """Not called automatically -- see _defer_item_cleanup's docstring for why a
+        timer-based auto-flush was removed. Kept only as an explicit, deliberate way to
+        release one batch early, for a call site that can independently guarantee no
+        repaint can still be pending against it."""
         try:
             self._pending_item_cleanup.remove(batch)
         except ValueError:
