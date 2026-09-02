@@ -183,6 +183,41 @@ def test_galaxy_shape_auto_ellipse_respects_max_radius_px_cap():
     assert geo.radius_y == pytest.approx(100.0 * (63.0 / 178.0))
 
 
+def test_connector_appears_for_a_large_eccentric_ellipse_label_near_the_minor_axis():
+    """Regression test for a real report: dragging a galaxy's label produced no
+    connector at all. Root cause -- the "attached, skip the connector" check compared
+    the label's distance to marker.radius, which for ELLIPSE is max(radius_x,
+    radius_y) (the *longest* axis). For a large, eccentric marker like a galaxy's
+    fitted ellipse (radius_x/radius_y can differ by 3x or more), a label dragged well
+    clear of the drawn oval along the *minor* axis direction could still fall well
+    inside that longest-axis radius and be wrongly treated as still attached. The
+    check must use the true ellipse boundary distance in the label's own direction."""
+    rx, ry, rotation = 2000.0, 700.0, 0.0  # M31-scale: a highly eccentric marker
+    style = _ellipse_style(radius_x=rx, radius_y=ry, rotation_deg=rotation)
+    # Label placed straight above the marker (along the *minor* axis at rotation=0,
+    # where the drawn boundary is only ~ry away) at a distance clearly outside the
+    # drawn oval (ry=700) but still well inside the longest-axis radius (rx=2000) --
+    # exactly the gap the old flat marker.radius check got wrong.
+    ann = _ann(label_x=1000.0, label_y=1000.0 - 900.0)  # marker at (1000, 1000)
+    marker = compute_marker_geometry(ann, style)
+    label = compute_label_geometry(ann, style)
+    points = compute_connector_points(ann, marker, label, ConnectorStyle.STRAIGHT)
+    assert points is not None, "a label clearly outside the drawn ellipse must get a connector"
+
+
+def test_connector_still_hidden_when_label_is_truly_inside_a_large_ellipse():
+    """The fix above must not make every large-ellipse label always get a connector --
+    a label that's still genuinely inside (or right at) the drawn boundary in its own
+    direction must still count as attached, same as any other shape."""
+    rx, ry, rotation = 2000.0, 700.0, 0.0
+    style = _ellipse_style(radius_x=rx, radius_y=ry, rotation_deg=rotation)
+    ann = _ann(label_x=1000.0, label_y=1000.0 - 100.0)  # well inside ry=700
+    marker = compute_marker_geometry(ann, style)
+    label = compute_label_geometry(ann, style)
+    points = compute_connector_points(ann, marker, label, ConnectorStyle.STRAIGHT)
+    assert points is None
+
+
 def test_connector_start_point_for_ellipse_marker_lands_on_the_boundary():
     """Full pipeline: an ELLIPSE-shaped marker's connector must start on the actual
     drawn (rotated) oval, not assume a circular radius."""
