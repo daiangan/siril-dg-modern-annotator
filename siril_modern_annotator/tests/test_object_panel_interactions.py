@@ -24,7 +24,36 @@ _app = QApplication.instance() or QApplication([])
 def test_simbad_url_for_a_plain_catalog_name():
     # Public/standalone (no Qt dependency) specifically so gui/main_window.py's canvas
     # right-click menu can build the identical link without a second, drifting copy.
-    assert simbad_url_for("M31") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=M31"
+    assert simbad_url_for("messier", "M31") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=M31"
+
+
+def test_simbad_url_rewrites_ldn_to_the_format_simbad_accepts():
+    # Regression test for a real report: Siril's own bundled ldn.csv spells this
+    # "LdN-1712" (mixed case, hyphen) -- confirmed live that SIMBAD rejects that
+    # outright ("incorrect format for catalogs") but accepts "LDN 1712".
+    assert simbad_url_for("ldn", "LdN-1712") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=LDN%201712"
+
+
+def test_simbad_url_rewrites_barnard_to_the_unambiguous_full_word():
+    # Regression test for a real report: confirmed live that bare "B42" (this app's
+    # own catalog_name, see _vii220a_row_to_annotation) is ambiguous on SIMBAD (matches
+    # GC/Batten catalogs too) -- only the full word "Barnard 42" resolves unambiguously.
+    assert simbad_url_for("barnard", "B42") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=Barnard%2042"
+
+
+def test_simbad_url_leaves_other_catalogs_unchanged():
+    # Every other catalog's own catalog_name format was confirmed live to already
+    # resolve correctly -- messier/ngc/ic/sh2/bright_star/user_dso all pass through.
+    assert simbad_url_for("sh2", "Sh2-155") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=Sh2-155"
+    assert simbad_url_for("ngc", "NGC5471") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=NGC5471"
+
+
+def test_simbad_url_ldn_fixup_is_case_insensitive_and_falls_back_safely():
+    # Same fixup applies regardless of incidental case, and a name that doesn't match
+    # the expected "LdN-<digits>" shape at all is passed through unchanged rather than
+    # silently mangled or raising.
+    assert simbad_url_for("ldn", "LDN-42") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=LDN%2042"
+    assert simbad_url_for("ldn", "some odd name") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=some%20odd%20name"
 
 
 def _catalog_annotation() -> Annotation:
@@ -68,6 +97,17 @@ def test_context_menu_opens_simbad_for_a_catalog_object(monkeypatch):
     panel._show_row_context_menu(_row_center(panel))
     assert len(opened) == 1
     assert opened[0] == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=M31"
+
+
+def test_context_menu_applies_the_barnard_fixup():
+    ann = Annotation(
+        catalog="barnard", catalog_name="B42", ra=10.0, dec=41.0, image_x=100.0, image_y=200.0,
+    )
+    panel = ObjectPanel()
+    panel.set_annotations([ann])
+    assert simbad_url_for(ann.catalog, ann.catalog_name) == (
+        "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=Barnard%2042"
+    )
 
 
 def test_context_menu_omits_simbad_for_a_custom_object(monkeypatch):

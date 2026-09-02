@@ -1364,7 +1364,7 @@ class MainWindow(QMainWindow):
         elif chosen is delete_action:
             self._delete_annotation(ann.id)
         elif chosen is simbad_action:
-            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog_name)))
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name)))
 
     def _on_object_double_clicked(self, annotation_id: str) -> None:
         # Per user request: double-clicking an object on the canvas should land the

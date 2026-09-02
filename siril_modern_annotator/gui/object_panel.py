@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import quote
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QUrl, Qt, pyqtSignal
@@ -25,17 +26,44 @@ from PyQt6.QtWidgets import (
 
 from ..annotation.models import Annotation, NameDisplayMode
 
-# https://simbad.cds.unistra.fr/Pages/guide/sim-url.htx -- confirmed live: resolves
-# catalog designations directly (M42, NGC5471, IC420, Sh2-155, ...) and Greek-letter
-# Bayer names exactly as this app already displays them (e.g. "ξ Cyg" resolves the
-# same as its Latin transliteration "ksi Cyg"). Public (not module-private) and
-# standalone (no Qt dependency) so gui/main_window.py's canvas right-click menu can
-# build the exact same link as this panel's, rather than a second, drifting copy.
+# https://simbad.cds.unistra.fr/Pages/guide/sim-url.htx -- confirmed live: most of this
+# app's own catalog_name strings resolve directly as SIMBAD identifiers (M42, NGC5471,
+# IC420, Sh2-155, and Greek-letter Bayer names like "ξ Cyg", which resolves the same as
+# its Latin transliteration "ksi Cyg"). Public (not module-private) and standalone (no
+# Qt dependency) so gui/main_window.py's canvas right-click menu can build the exact
+# same link as this panel's, rather than a second, drifting copy.
 _SIMBAD_URL = "https://simbad.cds.unistra.fr/simbad/sim-id?Ident={}"
 
+# Two confirmed exceptions, found by live-testing every catalog's actual format against
+# SIMBAD (per a real user report with screenshots):
+#   - LDN: Siril's own bundled ldn.csv spells this "LdN-1712" (mixed case, hyphen).
+#     SIMBAD rejects that outright ("incorrect format") but accepts "LDN 1712".
+#   - Barnard: this app's own catalog_name is "B42" (see _vii220a_row_to_annotation).
+#     SIMBAD treats bare "B42" -- and even "B 42" -- as ambiguous with unrelated
+#     catalogs (GC, Batten); only the full word "Barnard 42" resolves unambiguously.
+# Every other catalog's own catalog_name format was confirmed live to already resolve
+# correctly and needs no rewriting here.
+_SIMBAD_IDENTIFIER_FIXUPS: dict[str, re.Pattern[str]] = {
+    "ldn": re.compile(r"^LdN-(\d+)$", re.IGNORECASE),
+    "barnard": re.compile(r"^B(\d+)$", re.IGNORECASE),
+}
+_SIMBAD_IDENTIFIER_TEMPLATES = {
+    "ldn": "LDN {}",
+    "barnard": "Barnard {}",
+}
 
-def simbad_url_for(catalog_name: str) -> str:
-    return _SIMBAD_URL.format(quote(catalog_name))
+
+def _simbad_identifier(catalog: str, catalog_name: str) -> str:
+    pattern = _SIMBAD_IDENTIFIER_FIXUPS.get(catalog)
+    if pattern is not None:
+        match = pattern.match(catalog_name)
+        if match is not None:
+            return _SIMBAD_IDENTIFIER_TEMPLATES[catalog].format(match.group(1))
+    return catalog_name
+
+
+def simbad_url_for(catalog: str, catalog_name: str) -> str:
+    return _SIMBAD_URL.format(quote(_simbad_identifier(catalog, catalog_name)))
 
 _COLUMNS = ["Visible", "Object", "Catalog", "Type", "Magnitude", "Size"]
 
@@ -335,4 +363,4 @@ class ObjectPanel(QWidget):
         simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is simbad_action and simbad_action is not None:
-            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog_name)))
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name)))
