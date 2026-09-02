@@ -46,10 +46,12 @@ def test_online_only_catalogs_is_derived_not_stale():
     offline via their local file even when VizieR is unreachable) -- main_window.py
     uses this set to keep such catalogs off by default and to show a "needs an
     internet connection" status message instead of a misleading "0 objects" one.
-    Barnard, LBN, RCW, and vdB are the only ones right now; this must stay correct as
-    more VizieR-only catalogs (Abell, ...) are added, without anyone having to remember
-    to update a hand-maintained list."""
-    assert ONLINE_ONLY_CATALOGS == {"barnard", "lbn", "rcw", "vdb"}
+    Barnard, LBN, RCW, vdB, Arp, Hickson, and SNR are the only ones right now (Gum is
+    VizieR-only in name but not in mechanism -- GumProvider reads bundled Python data,
+    so it's deliberately absent here); this must stay correct as more VizieR-only
+    catalogs (Abell, ...) are added, without anyone having to remember to update a
+    hand-maintained list."""
+    assert ONLINE_ONLY_CATALOGS == {"barnard", "lbn", "rcw", "vdb", "arp", "hickson", "snr"}
     assert ONLINE_ONLY_CATALOGS <= set(SUPPORTED_CATALOGS)
 
 

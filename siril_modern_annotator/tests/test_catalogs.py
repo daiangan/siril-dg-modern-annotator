@@ -439,6 +439,60 @@ def test_dedupe_never_merges_vdb_with_a_same_position_ngc_entry():
     assert names == {"vdB 20", "NGC1432"}
 
 
+def test_dedupe_merges_arp_with_its_ngc_cross_reference_ngc_name_wins():
+    """Every Arp entry already carries a real NGC/UGC/MCG cross-reference (see
+    _vii192_row_to_annotation) -- Arp 1 is NGC 2857. When both catalogs report the
+    same galaxy at the same position, they must merge into one marker, with NGC's
+    more commonly cited name winning (ngc's priority is lower than arp's)."""
+    ra, dec = 141.16, 49.36
+    provider = CompositeProvider(
+        [
+            _StubProvider("arp", "Arp 1", ra, dec, object_type="galaxy"),
+            _StubProvider("ngc", "NGC2857", ra, dec, object_type="galaxy"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"arp", "ngc"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "NGC2857"
+
+
+def test_dedupe_never_merges_hickson_with_a_same_position_ngc_entry():
+    """Per the same reasoning already established for vdB: a Hickson compact group and
+    one of its individual member galaxies are conceptually different objects even
+    when their catalog positions are close, so Hickson is deliberately left out of
+    the cross-catalog dedup class."""
+    ra, dec = 6.5, 25.72
+    provider = CompositeProvider(
+        [
+            _StubProvider("hickson", "HCG 1", ra, dec, object_type="galaxy group"),
+            _StubProvider("ngc", "NGC7803", ra, dec, object_type="galaxy"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"hickson", "ngc"})
+    names = {a.catalog_name for a in results}
+    assert names == {"HCG 1", "NGC7803"}
+
+
+def test_dedupe_merges_snr_with_its_ngc_cross_reference():
+    """Confirmed live on SIMBAD: many cataloged SNRs share a position with an existing
+    Messier/NGC object (e.g. the Crab Nebula = M1 = NGC 1952) -- SNR joins the same
+    cross-catalog dedup class as RCW/Gum/etc. so they merge into one marker, with the
+    more commonly cited Messier/NGC name winning."""
+    ra, dec = 83.63, 22.01  # M1/Crab Nebula's real position
+    provider = CompositeProvider(
+        [
+            _StubProvider("snr", "SNR G184.6-05.8", ra, dec, object_type="supernova remnant"),
+            _StubProvider("messier", "M1", ra, dec, object_type="nebula"),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"snr", "messier"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "M1"
+
+
 class _PositionedStubProvider(CatalogProvider):
     """Returns one fixed-position Annotation, bypassing real WCS projection -- lets a
     test place a result exactly in-frame or out-of-frame without needing real sky
