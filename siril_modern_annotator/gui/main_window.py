@@ -518,6 +518,7 @@ class MainWindow(QMainWindow):
             self.overlay_settings = last_used_store.apply_last_used_overlay_settings(self.overlay_settings)
             self.overlay_settings.info_box.text = self._default_info_box_text()
             self._setup_overlay_items()
+            self._sync_overlay_action_checks()
             self.style_panel.set_overlay_settings(self.overlay_settings)
             # Prefer the actual loaded filename over the FITS OBJECT keyword -- per
             # user request, exports should be named after "the original image name",
@@ -862,6 +863,35 @@ class MainWindow(QMainWindow):
         self.image_view.scene_.addItem(self.compass_item)
         self.image_view.scene_.addItem(self.info_box_item)
         self.image_view.scene_.addItem(self.constellation_item)
+
+    def _sync_overlay_action_checks(self) -> None:
+        """Syncs the Overlays menu's checkable actions to self.overlay_settings'
+        current on/off state. Confirmed real report: the grid/compass/info box/
+        constellations QActions were only ever given a checked state once, at
+        __init__ time -- from the placeholder OverlaySettings() that exists before
+        the first image even loads, not the real settings _load_current_image()
+        restores moments later (last_used_store.apply_last_used_overlay_settings()).
+        The restored overlay itself rendered correctly either way (_setup_overlay_items
+        reads self.overlay_settings directly, independent of these actions' own
+        checked state), but the Overlays dropdown kept showing every entry unchecked
+        after a restored session, even though the overlay was genuinely on -- so this
+        needs calling anywhere overlay_settings is replaced wholesale (both here, right
+        after _setup_overlay_items, and in load() for a project file), not just once at
+        construction. blockSignals so this never re-fires _on_grid_toggled/etc, which
+        would otherwise treat a code-driven checkbox sync as a user click and re-run
+        _setup_overlay_items redundantly."""
+        self.grid_action.blockSignals(True)
+        self.grid_action.setChecked(self.overlay_settings.grid.enabled)
+        self.grid_action.blockSignals(False)
+        self.compass_action.blockSignals(True)
+        self.compass_action.setChecked(self.overlay_settings.compass.enabled)
+        self.compass_action.blockSignals(False)
+        self.info_box_action.blockSignals(True)
+        self.info_box_action.setChecked(self.overlay_settings.info_box.enabled)
+        self.info_box_action.blockSignals(False)
+        self.constellations_action.blockSignals(True)
+        self.constellations_action.setChecked(self.overlay_settings.constellations.enabled)
+        self.constellations_action.blockSignals(False)
 
     def _refresh_overlays(self) -> None:
         if self.grid_item is not None:
@@ -1743,18 +1773,7 @@ class MainWindow(QMainWindow):
             action.setChecked(key in self.active_catalogs)
             action.blockSignals(False)
         self.overlay_settings = project.overlay_settings
-        self.grid_action.blockSignals(True)
-        self.grid_action.setChecked(self.overlay_settings.grid.enabled)
-        self.grid_action.blockSignals(False)
-        self.compass_action.blockSignals(True)
-        self.compass_action.setChecked(self.overlay_settings.compass.enabled)
-        self.compass_action.blockSignals(False)
-        self.info_box_action.blockSignals(True)
-        self.info_box_action.setChecked(self.overlay_settings.info_box.enabled)
-        self.info_box_action.blockSignals(False)
-        self.constellations_action.blockSignals(True)
-        self.constellations_action.setChecked(self.overlay_settings.constellations.enabled)
-        self.constellations_action.blockSignals(False)
+        self._sync_overlay_action_checks()
         if self.wcs is not None:
             self._setup_overlay_items()
         self.undo_stack.clear()
