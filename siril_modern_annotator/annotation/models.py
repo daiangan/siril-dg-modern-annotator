@@ -160,14 +160,31 @@ class InfoBoxStyle:
 
 
 @dataclass
+class ConstellationStyle:
+    """Constellation stick-figure lines + name labels -- image-level, not per-object,
+    same category as GridStyle/CompassStyle. Unlike those two, its geometry doesn't
+    come from WCS math alone: it's Siril's own bundled constellations.csv/
+    constellationsnames.csv (see annotation/constellations.py), filtered to the
+    current frame by annotation/renderer.py's compute_constellation_geometry."""
+
+    enabled: bool = False  # off by default, same reasoning as GridStyle/CompassStyle
+    color: str = "#A9B4C2"
+    opacity: float = 0.7
+    line_width: float = 1.0
+    show_labels: bool = True
+    label_font_size: float = 11.0
+
+
+@dataclass
 class OverlaySettings:
     """Bundles every image-level (as opposed to per-object) overlay -- the RA/Dec
-    grid, compass, and technical-details info box; a scale bar is a planned future
-    addition here."""
+    grid, compass, technical-details info box, and constellation lines; a scale bar is
+    a planned future addition here."""
 
     grid: GridStyle = field(default_factory=GridStyle)
     compass: CompassStyle = field(default_factory=CompassStyle)
     info_box: InfoBoxStyle = field(default_factory=InfoBoxStyle)
+    constellations: ConstellationStyle = field(default_factory=ConstellationStyle)
 
 
 @dataclass
@@ -234,6 +251,12 @@ class Annotation:
     connector_color: str | None = None
     connector_width: float | None = None
     custom_display_name: str | None = None
+    # A catalog-provided identifier known to resolve reliably on SIMBAD (e.g. "HD
+    # 186675"), independent of catalog_name -- some catalogs' display names (Bayer/
+    # Flamsteed strings like "b01 Cyg", Siril's "LdN-1712") are ambiguous or malformed
+    # as SIMBAD queries even though the source data has a better identifier available.
+    # None means "fall back to catalog_name-based lookup" (see object_panel.simbad_url_for).
+    simbad_id: str | None = None
 
     def display_name(self, mode: NameDisplayMode) -> str:
         if self.custom_display_name:
@@ -288,6 +311,11 @@ CATALOG_PRIORITY: dict[str, int] = {
     # more commonly cited name for these in astrophotography circles (e.g. the
     # Horsehead's dark patch as "B33"), so Barnard wins the on-image label.
     "barnard": 24,
+    # Least commonly cited name among the deep-sky catalogs above for a shared object
+    # (e.g. an LBN nebula that's also cataloged as Sh2/IC/NGC) -- those catalogs' names
+    # are the ones astrophotographers actually use, so LBN only wins the display name
+    # when nothing else covers the same object.
+    "lbn": 26,
     "bright_star": 30,
     # A deliberately, individually searched-and-confirmed object (Siril's own
     # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"

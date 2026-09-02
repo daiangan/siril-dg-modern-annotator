@@ -80,6 +80,8 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     # ONLINE_ONLY_CATALOGS below, which keeps it off by default and drives the
     # "needs an internet connection" status message in main_window.py.
     "barnard": "Barnard Catalogue of Dark Nebulae (B)",
+    # Also VizieR-only (VII/9, no bundled Siril CSV) -- same reasoning as barnard above.
+    "lbn": "Lynds Catalogue of Bright Nebulae (LBN)",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
@@ -100,6 +102,7 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "sh2": "#F2938C",  # soft coral
     "bright_star": "#F5E6A3",  # pale warm yellow
     "barnard": "#9FC9A8",  # soft sage green
+    "lbn": "#D9A066",  # soft terracotta/amber
     "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
@@ -356,6 +359,7 @@ _VIZIER_CATALOGS: dict[str, str] = {
     "sh2": "VII/20",
     "barnard": "VII/220A",
     "bright_star": "V/50",
+    "lbn": "VII/9",
 }
 
 # A catalog with a VizieR ID but no bundled Siril CSV (see _LOCAL_CATALOG_FILES) has no
@@ -494,7 +498,22 @@ def _v50_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Anno
         object_type="star",
         magnitude=mag,
         priority=default_priority_for_catalog("bright_star"),
+        simbad_id=_v50_simbad_id(row),
     )
+
+
+def _v50_simbad_id(row) -> str | None:
+    """V/50's HD/HR numbers are confirmed live to always resolve on SIMBAD (unlike the
+    reconstructed Bayer/Flamsteed Name string, which SIMBAD sometimes rejects or
+    misresolves -- e.g. "b01 Cyg" collides with several unrelated catalog prefixes).
+    Prefer HD (Henry Draper) since it's the more universally indexed of the two."""
+    hd = _row_str(row, "HD")
+    if hd:
+        return f"HD {hd}"
+    hr = _row_str(row, "HR")
+    if hr:
+        return f"HR {hr}"
+    return None
 
 
 def _format_v50_name(row) -> str | None:
@@ -599,6 +618,48 @@ def _vii220a_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "
     )
 
 
+def _vii9_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/9 (Lynds' Catalogue of Bright Nebulae, 1965). Real, confirmed schema
+    (live-queried against VizieR): Seq is the catalog's own bare number (the "LBN NNN"
+    designation); native RA1950/DE1950 are minute-precision only (no seconds) and B1950,
+    but -- like VII/220A's Barnard -- VizieR also returns _RA.icrs/_DE.icrs pre-converted
+    to ICRS at full (arcsec) precision, sparing both the manual B1950 frame transform and
+    the precision loss. No magnitude field (LBN catalogs nebulae, not point sources);
+    Diam1 is the major-axis angular size in arcmin (Diam2 is the minor axis -- Diam1
+    alone matches the single-value angular_size convention already used for VII/20/
+    VII/220A)."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    lbn_num = _row_str(row, "Seq")
+    if not lbn_num:
+        return None
+    ra_str, dec_str = _row_str(row, "_RA.icrs"), _row_str(row, "_DE.icrs")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="lbn",
+        catalog_name=f"LBN {lbn_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="nebula",
+        angular_size=_safe_float(_row_str(row, "Diam1")),
+        priority=default_priority_for_catalog("lbn"),
+    )
+
+
 # One parser per queryable VizieR catalog ID -- replaces a previous generic column-name
 # guesser (colnames.get("ra") or colnames.get("_raj2000") or ...) that silently returned
 # zero rows for every one of these catalogs: real VizieR schemas use sexagesimal-string
@@ -611,6 +672,7 @@ _VIZIER_ROW_PARSERS = {
     "V/50": _v50_row_to_annotation,
     "VII/20": _vii20_row_to_annotation,
     "VII/220A": _vii220a_row_to_annotation,
+    "VII/9": _vii9_row_to_annotation,
 }
 
 # Circuit breaker: flips off after the first VizieR connectivity failure and stays off
@@ -692,7 +754,18 @@ class VizierProvider(CatalogProvider):
                 return results
             if not table_list:
                 continue
-            results.extend(self._rows_to_annotations(table_list[0], vizier_id, wcs, mag_limit))
+            parsed = self._rows_to_annotations(table_list[0], vizier_id, wcs, mag_limit)
+            # VII/118 is one combined NGC/IC/Messier catalog -- querying it can't be
+            # restricted server-side to just the messier/ngc/ic subset this caller
+            # actually wants, and each row's *own* catalog (messier vs ngc/ic) is only
+            # decided after parsing (a Messier cross-ref in its Desc field promotes an
+            # NGC/IC row to "messier" -- see _vii118_row_to_annotation). Without this
+            # filter, requesting only "messier" still returned every NGC/IC object VII/
+            # 118 happens to have in the field too -- confirmed by a real screenshot:
+            # NGC/IC markers kept appearing with only Messier checked in the Catalogs
+            # menu. sh2/barnard/bright_star's own vizier ids are each 1:1 with a single
+            # catalog key, so this is a no-op for them either way.
+            results.extend(ann for ann in parsed if ann.catalog in catalogs)
 
         return results
 
@@ -721,7 +794,7 @@ class VizierProvider(CatalogProvider):
 # against each other by position (the same object legitimately gets cross-referenced,
 # e.g. M42 == NGC1976), but a star catalog entry never counts as a positional duplicate
 # of anything outside its own catalog.
-_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard"}
+_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn"}
 
 
 def _same_dedup_class(catalog_a: str, catalog_b: str) -> bool:
@@ -822,6 +895,7 @@ class CompositeProvider(CatalogProvider):
                         ann.common_name = ann.common_name or existing.common_name
                         ann.magnitude = ann.magnitude if ann.magnitude is not None else existing.magnitude
                         ann.angular_size = ann.angular_size if ann.angular_size is not None else existing.angular_size
+                        ann.simbad_id = ann.simbad_id or existing.simbad_id
                         kept[kept.index(existing)] = ann
                     else:
                         # Prefer the richer record (has common_name/object_type/magnitude)
@@ -835,6 +909,15 @@ class CompositeProvider(CatalogProvider):
                             existing.magnitude = ann.magnitude
                         if ann.angular_size is not None and existing.angular_size is None:
                             existing.angular_size = ann.angular_size
+                        # Fixes a real report: Siril's own bundled stars.csv (read by
+                        # LocalCsvProvider, which wins bright_star's display name/
+                        # position) names some stars with a bare lowercase Bayer letter
+                        # ("b01 Cyg") that SIMBAD can't resolve on its own -- but VizieR's
+                        # V/50 cross-references the same star (matched here by position)
+                        # to a reliable HD/HR number, so pull it in as this object's
+                        # simbad_id without touching its display name.
+                        if ann.simbad_id and not existing.simbad_id:
+                            existing.simbad_id = ann.simbad_id
                         # LocalCsvProvider has no real object-type data and sets this to
                         # the catalog name itself as a placeholder (e.g. "ngc") -- VII/118
                         # (via VizierProvider) does carry a real NGC2000.0 type code, so

@@ -34,10 +34,12 @@ from ..annotation.models import (
     StylePreset,
 )
 from ..annotation.pixel_utils import correct_fits_row_order, to_hwc_uint8
+from ..annotation.constellations import ConstellationLine, ConstellationName
 from ..annotation.renderer import (
     default_max_marker_radius_px,
     compute_compass_geometry,
     compute_connector_points,
+    compute_constellation_geometry,
     compute_grid_geometry,
     compute_info_box_geometry,
     compute_label_geometry,
@@ -210,6 +212,8 @@ def render_annotations(
     catalog_colors: dict[str, str] | None = None,
     wcs: SirilWcs | None = None,
     overlay_settings: OverlaySettings | None = None,
+    constellation_lines: list[ConstellationLine] | None = None,
+    constellation_names: list[ConstellationName] | None = None,
 ) -> Image.Image:
     """Composites enabled annotations onto base_rgb (already at output_width x
     output_height) using the shared geometry from annotation.renderer, scaled by
@@ -225,13 +229,18 @@ def render_annotations(
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    # Grid first (underneath everything, matching GridItem's low z-value in the
-    # interactive canvas), objects next, info box after that, compass last (always on
-    # top, matching each item's z-value in the interactive canvas: grid=1, marker=10,
-    # label=20, info box=25, compass=30) -- grid/compass need a real WCS, silently
-    # skipped otherwise (e.g. exporting before an image ever loaded, which shouldn't
-    # normally happen but costs nothing to guard).
+    # Constellation lines first (sky-background context, matching
+    # ConstellationLinesItem's z-value of 0 -- below even the grid), then the grid
+    # (z=1), objects next, info box after that, compass last (always on top, matching
+    # each item's z-value in the interactive canvas: constellations=0, grid=1,
+    # marker=10, label=20, info box=25, compass=30) -- grid/compass/constellations all
+    # need a real WCS, silently skipped otherwise (e.g. exporting before an image ever
+    # loaded, which shouldn't normally happen but costs nothing to guard).
     if wcs is not None and overlay_settings is not None:
+        _draw_constellations(
+            overlay, wcs, overlay_settings.constellations,
+            constellation_lines or [], constellation_names or [], scale,
+        )
         _draw_grid(overlay, wcs, overlay_settings.grid, scale)
 
     for ann in annotations:
@@ -454,6 +463,21 @@ def _draw_compass(draw: ImageDraw.ImageDraw, wcs: SirilWcs, style, scale: float)
     draw.text(east, "E", fill=color, font=font, anchor="mm")
 
 
+def _draw_constellations(overlay: Image.Image, wcs: SirilWcs, style, lines, names, scale: float) -> None:
+    if not style.enabled:
+        return
+    geo = compute_constellation_geometry(wcs, style, lines, names)
+    draw = ImageDraw.Draw(overlay)
+    color = _rgba(style.color, style.opacity)
+    width = max(1, round(style.line_width * scale))
+    for p0, p1 in geo.lines:
+        draw.line([_scaled(p0, scale), _scaled(p1, scale)], fill=color, width=width)
+    if geo.labels:
+        font = _font_for_style(LabelStyle(font_family=_FALLBACK_FONT_FAMILY, font_size=style.label_font_size), scale)
+        for label in geo.labels:
+            draw.text(_scaled((label.x, label.y), scale), label.text, fill=color, font=font)
+
+
 def _draw_info_box(draw: ImageDraw.ImageDraw, style, image_width: float, image_height: float, scale: float) -> None:
     # compute_info_box_geometry wraps style's font_size/padding into a LabelStyle
     # internally before calling this measurer -- _pillow_text_measurer only needs
@@ -485,6 +509,8 @@ def export_image(
     catalog_colors: dict[str, str] | None = None,
     wcs: SirilWcs | None = None,
     overlay_settings: OverlaySettings | None = None,
+    constellation_lines: list[ConstellationLine] | None = None,
+    constellation_names: list[ConstellationName] | None = None,
 ) -> Path:
     progress("Preparing image data...")
     # Dimensions must come from the *normalized* array, not the raw pixel_data's own
@@ -501,6 +527,7 @@ def export_image(
     composited = render_annotations(
         base_rgb, annotations, global_style, out_w, out_h, arcsec_per_px, catalog_colors,
         wcs=wcs, overlay_settings=overlay_settings,
+        constellation_lines=constellation_lines, constellation_names=constellation_names,
     )
 
     output_path = Path(output_path)

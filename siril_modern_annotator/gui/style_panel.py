@@ -586,9 +586,35 @@ class StylePanel(QWidget):
         info_box_layout.addWidget(self.info_box_text_edit)
         info_box_layout.addLayout(info_box_form)
 
+        # Stick-figure lines + name labels (Siril's own bundled constellations.csv/
+        # constellationsnames.csv, see annotation/constellations.py) -- on/off itself
+        # lives on the toolbar's "Overlays" menu, same split as Grid/Compass/Info Box
+        # above.
+        constellations_group = QGroupBox("Constellations")
+        constellations_form = QFormLayout(constellations_group)
+        self.constellations_color = ColorButton("#A9B4C2")
+        self.constellations_opacity = DarkDoubleSpinBox()
+        self.constellations_opacity.setRange(0.05, 1.0)
+        self.constellations_opacity.setSingleStep(0.05)
+        # Same reasoning/cap as grid_line_width above.
+        self.constellations_line_width = DarkDoubleSpinBox()
+        self.constellations_line_width.setRange(0.2, 40.0)
+        self.constellations_line_width.setSingleStep(0.2)
+        self.constellations_show_labels = QCheckBox("Show constellation names")
+        self.constellations_show_labels.setChecked(True)
+        # Same reasoning/cap as grid_label_size above.
+        self.constellations_label_size = DarkDoubleSpinBox()
+        self.constellations_label_size.setRange(6.0, 200.0)
+        constellations_form.addRow("Color", self.constellations_color)
+        constellations_form.addRow("Opacity", self.constellations_opacity)
+        constellations_form.addRow("Line width", self.constellations_line_width)
+        constellations_form.addRow(self.constellations_show_labels)
+        constellations_form.addRow("Label size", self.constellations_label_size)
+
         overlays_layout.addWidget(grid_group)
         overlays_layout.addWidget(compass_group)
         overlays_layout.addWidget(info_box_group)
+        overlays_layout.addWidget(constellations_group)
         overlays_layout.addStretch(1)
 
         for w in (
@@ -597,6 +623,8 @@ class StylePanel(QWidget):
             self.compass_line_width, self.compass_arrow_size, self.compass_label_size,
             self.info_box_corner, self.info_box_bg_opacity, self.info_box_border_radius,
             self.info_box_padding, self.info_box_font_size,
+            self.constellations_opacity, self.constellations_line_width,
+            self.constellations_show_labels, self.constellations_label_size,
         ):
             signal = (
                 getattr(w, "currentIndexChanged", None)
@@ -604,7 +632,10 @@ class StylePanel(QWidget):
                 or getattr(w, "toggled", None)
             )
             signal.connect(self.overlay_settings_changed)
-        for btn in (self.grid_color, self.compass_color, self.info_box_bg_color, self.info_box_text_color):
+        for btn in (
+            self.grid_color, self.compass_color, self.info_box_bg_color, self.info_box_text_color,
+            self.constellations_color,
+        ):
             btn.color_changed.connect(lambda _c: self.overlay_settings_changed.emit())
         self.info_box_text_edit.textChanged.connect(self.overlay_settings_changed)
 
@@ -696,6 +727,11 @@ class StylePanel(QWidget):
         self.info_box_padding.setValue(settings.info_box.padding)
         self.info_box_text_color.set_color(settings.info_box.text_color)
         self.info_box_font_size.setValue(settings.info_box.font_size)
+        self.constellations_color.set_color(settings.constellations.color)
+        self.constellations_opacity.setValue(settings.constellations.opacity)
+        self.constellations_line_width.setValue(settings.constellations.line_width)
+        self.constellations_show_labels.setChecked(settings.constellations.show_labels)
+        self.constellations_label_size.setValue(settings.constellations.label_font_size)
         self.blockSignals(block)
         self.reset_compass_btn.setVisible(settings.compass.anchor_x is not None)
         self.reset_info_box_btn.setVisible(settings.info_box.anchor_x is not None)
@@ -729,6 +765,15 @@ class StylePanel(QWidget):
             "padding": self.info_box_padding.value(),
             "text_color": self.info_box_text_color.hex_color,
             "font_size": self.info_box_font_size.value(),
+        }
+
+    def pending_constellation_style_values(self) -> dict:
+        return {
+            "color": self.constellations_color.hex_color,
+            "opacity": self.constellations_opacity.value(),
+            "line_width": self.constellations_line_width.value(),
+            "show_labels": self.constellations_show_labels.isChecked(),
+            "label_font_size": self.constellations_label_size.value(),
         }
 
     def set_catalog_colors(self, colors: dict[str, str]) -> None:

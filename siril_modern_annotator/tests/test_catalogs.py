@@ -172,11 +172,13 @@ class _StubProvider(CatalogProvider):
     def __init__(
         self, catalog: str, catalog_name: str, ra: float, dec: float,
         object_type: str | None = None, image_x: float = 0.0, image_y: float = 0.0,
+        simbad_id: str | None = None,
     ):
         self._ann = Annotation(
             catalog=catalog, catalog_name=catalog_name, ra=ra, dec=dec,
             image_x=image_x, image_y=image_y, priority=0,
             object_type=object_type if object_type is not None else catalog,
+            simbad_id=simbad_id,
         )
         self._catalog = catalog
 
@@ -288,6 +290,34 @@ def test_dedupe_fills_in_a_real_object_type_without_touching_the_kept_position()
     results = provider.query(_wcs(), {"ngc"})
     assert len(results) == 1
     assert results[0].object_type == "HII region"
+    assert (results[0].image_x, results[0].image_y) == (100.0, 200.0)
+
+
+def test_dedupe_fills_in_simbad_id_from_the_vizier_cross_reference():
+    """Regression test for a real report: Siril's own bundled stars.csv (read by
+    LocalCsvProvider, which wins bright_star's display name via the position tie above)
+    names this star "b01 Cyg" -- SIMBAD rejects that outright as an ambiguous/malformed
+    identifier. VizieR's V/50 (via VizierProvider) cross-references the same star, at
+    the same position, to "27 Cyg" / HD 191026 -- confirmed live on SIMBAD that both are
+    identifiers for the one object. The dedup merge must carry that HD number over as
+    simbad_id without touching the "b01 Cyg" display name LocalCsvProvider already won."""
+    provider = CompositeProvider(
+        [
+            _StubProvider(
+                "bright_star", "b01 Cyg", 301.590697, 35.972469,
+                image_x=100.0, image_y=200.0,
+            ),
+            _StubProvider(
+                "bright_star", "27 Cyg", 301.590697, 35.972469,
+                image_x=999.0, image_y=999.0, simbad_id="HD 191026",
+            ),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"bright_star"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "b01 Cyg"
+    assert results[0].simbad_id == "HD 191026"
     assert (results[0].image_x, results[0].image_y) == (100.0, 200.0)
 
 

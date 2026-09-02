@@ -10,6 +10,7 @@ from siril_modern_annotator.annotation.models import (
     BackgroundMode,
     CompassStyle,
     ConnectorStyle,
+    ConstellationStyle,
     GridStyle,
     InfoBoxCorner,
     InfoBoxStyle,
@@ -73,6 +74,7 @@ def _sample_project() -> ProjectData:
                 enabled=True, text="Camera: Foo\nGain: 100", corner=InfoBoxCorner.TOP_RIGHT,
                 background_color="#111111", anchor_x=300.0, anchor_y=400.0,
             ),
+            constellations=ConstellationStyle(enabled=True, color="#bbccdd", show_labels=False),
         ),
     )
 
@@ -137,6 +139,9 @@ def test_round_trip_preserves_annotation_fields(tmp_path: Path):
     assert loaded.overlay_settings.info_box.background_color == "#111111"
     assert loaded.overlay_settings.info_box.anchor_x == 300.0
     assert loaded.overlay_settings.info_box.anchor_y == 400.0
+    assert loaded.overlay_settings.constellations.enabled is True
+    assert loaded.overlay_settings.constellations.color == "#bbccdd"
+    assert loaded.overlay_settings.constellations.show_labels is False
 
 
 def test_load_project_saved_before_overlay_settings_existed(tmp_path: Path):
@@ -153,6 +158,7 @@ def test_load_project_saved_before_overlay_settings_existed(tmp_path: Path):
     assert loaded.overlay_settings.grid.enabled is False
     assert loaded.overlay_settings.compass.enabled is False
     assert loaded.overlay_settings.info_box.enabled is False
+    assert loaded.overlay_settings.constellations.enabled is False
 
 
 def test_load_project_saved_before_info_box_existed(tmp_path: Path):
@@ -169,6 +175,21 @@ def test_load_project_saved_before_info_box_existed(tmp_path: Path):
     loaded = load(path)
     assert loaded.overlay_settings.grid.enabled is True  # unaffected
     assert loaded.overlay_settings.info_box.enabled is False
+
+
+def test_load_project_saved_before_constellations_existed(tmp_path: Path):
+    """Same backward-compatibility guarantee as info_box above, for a project file
+    saved after info_box shipped but before constellation lines did."""
+    project = _sample_project()
+    path = tmp_path / "test.annotations.json"
+    save(path, project)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["overlay_settings"]["constellations"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load(path)
+    assert loaded.overlay_settings.grid.enabled is True  # unaffected
+    assert loaded.overlay_settings.constellations.enabled is False
 
 
 def test_project_path_for_image():

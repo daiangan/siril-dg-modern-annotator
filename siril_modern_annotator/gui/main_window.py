@@ -46,6 +46,7 @@ from ..annotation.catalogs import (
     count_local_catalog_entries,
     vizier_is_available,
 )
+from ..annotation.constellations import load_constellation_lines, load_constellation_names
 from ..annotation.layout import auto_arrange
 from ..annotation.models import (
     Annotation,
@@ -70,7 +71,7 @@ from ..persistence import presets as preset_store
 from ..persistence.project import CatalogConfig, ExportSettings, ProjectData, load, project_path_for_image, save
 from ..siril_bridge.interface import ImageInfo, NoImageLoadedError, SirilBridge, SirilBridgeError
 from .annotation_item import ConnectorItem, LabelItem, MarkerItem, qt_text_measurer
-from .overlay_item import CompassItem, GridItem, InfoBoxItem
+from .overlay_item import CompassItem, ConstellationLinesItem, GridItem, InfoBoxItem
 from .commands import (
     AddAnnotationCommand,
     AnnotationFieldsCommand,
@@ -85,7 +86,7 @@ from .commands import (
 )
 from .export_dialog import ExportDialog
 from .image_view import ImageView
-from .object_panel import ObjectPanel
+from .object_panel import ObjectPanel, simbad_url_for
 from .style_panel import StylePanel
 from .tools_panel import ToolsPanel
 from .workers import CatalogFetchWorker, ExportWorker
@@ -142,6 +143,13 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
 
         self.bridge = bridge
+        # Static, image-independent data (unlike every CatalogProvider query, this
+        # doesn't depend on the WCS at all) -- loaded once here rather than re-read
+        # from disk on every image load. Empty lists (not a crash) if this Siril
+        # install's catalogue dir happens to lack the files -- see
+        # annotation/constellations.py's own loader docstrings.
+        self._constellation_lines = load_constellation_lines(self.bridge.get_system_catalogue_dir())
+        self._constellation_names = load_constellation_names(self.bridge.get_system_catalogue_dir())
         self.undo_stack = QUndoStack(self)
         self.annotations: list[Annotation] = []
         # Restore the user's last-used general settings (brief: persist across sessions
@@ -201,6 +209,7 @@ class MainWindow(QMainWindow):
         self.grid_item: GridItem | None = None
         self.compass_item: CompassItem | None = None
         self.info_box_item: InfoBoxItem | None = None
+        self.constellation_item: ConstellationLinesItem | None = None
 
         self._pending_object_cmd: AnnotationFieldsCommand | None = None
         self._pending_object_target: str | None = None
@@ -245,6 +254,7 @@ class MainWindow(QMainWindow):
         self.object_panel.select_all_requested.connect(lambda ids: self._bulk_visibility(ids, True))
         self.object_panel.deselect_all_requested.connect(lambda ids: self._bulk_visibility(ids, False))
         self.object_panel.reset_requested.connect(self._reset_layout)
+        self.object_panel.object_double_clicked.connect(self._on_object_double_clicked)
 
         self.style_panel = StylePanel()
         self.style_panel.set_global_style(self.global_style_holder[0])
@@ -363,9 +373,13 @@ class MainWindow(QMainWindow):
         self.info_box_action = QAction("Info Box", self, checkable=True)
         self.info_box_action.setChecked(self.overlay_settings.info_box.enabled)
         self.info_box_action.toggled.connect(self._on_info_box_toggled)
+        self.constellations_action = QAction("Constellations", self, checkable=True)
+        self.constellations_action.setChecked(self.overlay_settings.constellations.enabled)
+        self.constellations_action.toggled.connect(self._on_constellations_toggled)
         self.overlays_menu.addAction(self.grid_action)
         self.overlays_menu.addAction(self.compass_action)
         self.overlays_menu.addAction(self.info_box_action)
+        self.overlays_menu.addAction(self.constellations_action)
         overlays_btn.setMenu(self.overlays_menu)
         toolbar.addWidget(overlays_btn)
         toolbar.addSeparator()
@@ -760,12 +774,25 @@ class MainWindow(QMainWindow):
     def _setup_overlay_items(self) -> None:
         """Creates (or, on reloading a different image, re-creates against the new
         wcs/image size) the grid/compass/info box scene items. Independent of
-        _rebuild_scene -- those are one-per-Annotation, these are one-per-image."""
+        _rebuild_scene -- those are one-per-Annotation, these are one-per-image.
+
+        Real crash report (macOS crash log, SIGSEGV inside QGraphicsView::paintEvent's
+        item traversal, triggered by a later, unrelated toolbar button click): this
+        used to call removeItem() and immediately overwrite self.grid_item/
+        compass_item/info_box_item, dropping the last Python reference right away.
+        Same known class of PyQt/Qt use-after-free _defer_item_cleanup already exists
+        to guard against for markers/labels/connectors (see its own docstring) --
+        applies just as much here, it just hadn't been wired up for these three items
+        yet. Collect what got removed and hand it to that same deferred-cleanup path
+        instead of letting them be garbage-collected immediately."""
         if self.wcs is None:
             return
-        for item in (self.grid_item, self.compass_item, self.info_box_item):
+        removed = []
+        for item in (self.grid_item, self.compass_item, self.info_box_item, self.constellation_item):
             if item is not None and item.scene() is not None:
                 item.scene().removeItem(item)
+                removed.append(item)
+        self._defer_item_cleanup(removed)
         self.grid_item = GridItem(self.wcs, self.overlay_settings.grid)
         self.compass_item = CompassItem(self.wcs, self.overlay_settings.compass)
         self.compass_item.moved.connect(self._on_compass_moved)
@@ -777,9 +804,13 @@ class MainWindow(QMainWindow):
         self.info_box_item.moved.connect(self._on_info_box_moved)
         self.info_box_item.context_menu_requested.connect(self._show_info_box_context_menu)
         self.info_box_item.clicked.connect(self._on_info_box_clicked)
+        self.constellation_item = ConstellationLinesItem(
+            self.wcs, self.overlay_settings.constellations, self._constellation_lines, self._constellation_names,
+        )
         self.image_view.scene_.addItem(self.grid_item)
         self.image_view.scene_.addItem(self.compass_item)
         self.image_view.scene_.addItem(self.info_box_item)
+        self.image_view.scene_.addItem(self.constellation_item)
 
     def _refresh_overlays(self) -> None:
         if self.grid_item is not None:
@@ -791,6 +822,9 @@ class MainWindow(QMainWindow):
         if self.info_box_item is not None:
             self.info_box_item._sync_pos_from_model()
             self.info_box_item.update()
+        if self.constellation_item is not None:
+            self.constellation_item.prepareGeometryChange()
+            self.constellation_item.update()
         self.style_panel.set_overlay_settings(self.overlay_settings)
 
     def _on_grid_toggled(self, checked: bool) -> None:
@@ -808,6 +842,11 @@ class MainWindow(QMainWindow):
         self._refresh_overlays()
         last_used_store.save_last_used_overlay_settings(self.overlay_settings)
 
+    def _on_constellations_toggled(self, checked: bool) -> None:
+        self.overlay_settings.constellations.enabled = checked
+        self._refresh_overlays()
+        last_used_store.save_last_used_overlay_settings(self.overlay_settings)
+
     def _on_overlay_style_edited(self) -> None:
         # No undo tracking, same as catalog color edits (_on_catalog_color_changed) --
         # a style tweak, not a spatial edit like the compass/info box drag/reset below.
@@ -817,6 +856,8 @@ class MainWindow(QMainWindow):
             setattr(self.overlay_settings.compass, key, value)
         for key, value in self.style_panel.pending_info_box_style_values().items():
             setattr(self.overlay_settings.info_box, key, value)
+        for key, value in self.style_panel.pending_constellation_style_values().items():
+            setattr(self.overlay_settings.constellations, key, value)
         self._refresh_overlays()
         # Per user request: on/off state and non-size-dependent style (color, opacity,
         # label positions, corner) should carry over across sessions -- see
@@ -1319,6 +1360,11 @@ class MainWindow(QMainWindow):
         # Hide above is the correct (and only) way to remove it from view. See
         # DeleteAnnotationCommand's docstring.
         delete_action = menu.addAction(f"Delete {name}") if ann.catalog == "user" else None
+        # Per user request: same "Open in SIMBAD" action as the Objects panel's own
+        # right-click menu (object_panel.py), reusing its exact URL-building logic
+        # rather than a second, drifting copy. Same catalog == "user" exclusion --  a
+        # custom object has no real catalog identifier for SIMBAD to resolve.
+        simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
         # Acting on menu.exec()'s *return value* here, after it returns, rather than
         # on each action's triggered signal (which fires *during* exec()'s own still-
         # active nested event loop) -- real crash report (a full macOS crash log, not
@@ -1344,6 +1390,8 @@ class MainWindow(QMainWindow):
             self._reset_selected_marker_position()
         elif chosen is delete_action:
             self._delete_annotation(ann.id)
+        elif chosen is simbad_action:
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name, ann.simbad_id)))
 
     def _on_object_double_clicked(self, annotation_id: str) -> None:
         # Per user request: double-clicking an object on the canvas should land the
@@ -1538,6 +1586,7 @@ class MainWindow(QMainWindow):
             settings, self.arcsec_per_px, self.icc_profile,
             catalog_colors=self.catalog_colors,
             wcs=self.wcs, overlay_settings=self.overlay_settings,
+            constellation_lines=self._constellation_lines, constellation_names=self._constellation_names,
         )
         self._export_worker.progress.connect(self._progress_dialog.setLabelText)
         self._export_worker.succeeded.connect(self._on_export_succeeded)
@@ -1623,6 +1672,9 @@ class MainWindow(QMainWindow):
         self.info_box_action.blockSignals(True)
         self.info_box_action.setChecked(self.overlay_settings.info_box.enabled)
         self.info_box_action.blockSignals(False)
+        self.constellations_action.blockSignals(True)
+        self.constellations_action.setChecked(self.overlay_settings.constellations.enabled)
+        self.constellations_action.blockSignals(False)
         if self.wcs is not None:
             self._setup_overlay_items()
         self.undo_stack.clear()

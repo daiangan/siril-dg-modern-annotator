@@ -16,6 +16,7 @@ import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..annotation.catalogs import CatalogProvider
+from ..annotation.constellations import ConstellationLine, ConstellationName
 from ..annotation.models import Annotation, OverlaySettings, StylePreset
 from ..annotation.wcs import SirilWcs
 from ..persistence.project import ExportSettings
@@ -68,6 +69,8 @@ class ExportWorker(QThread):
         catalog_colors: dict[str, str] | None = None,
         wcs: SirilWcs | None = None,
         overlay_settings: OverlaySettings | None = None,
+        constellation_lines: list[ConstellationLine] | None = None,
+        constellation_names: list[ConstellationName] | None = None,
     ):
         super().__init__(parent)
         self._output_path = output_path
@@ -80,6 +83,8 @@ class ExportWorker(QThread):
         self._catalog_colors = catalog_colors
         self._wcs = wcs
         self._overlay_settings = overlay_settings
+        self._constellation_lines = constellation_lines
+        self._constellation_names = constellation_names
 
     def run(self) -> None:
         from ..export.exporter import export_image
@@ -97,6 +102,8 @@ class ExportWorker(QThread):
                 catalog_colors=self._catalog_colors,
                 wcs=self._wcs,
                 overlay_settings=self._overlay_settings,
+                constellation_lines=self._constellation_lines,
+                constellation_names=self._constellation_names,
             )
             self.succeeded.emit(str(result))
         except Exception as exc:  # noqa: BLE001

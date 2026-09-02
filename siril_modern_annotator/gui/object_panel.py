@@ -4,7 +4,11 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, pyqtSignal
+import re
+from urllib.parse import quote
+
+from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -12,6 +16,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QStackedWidget,
     QTableView,
@@ -20,6 +25,51 @@ from PyQt6.QtWidgets import (
 )
 
 from ..annotation.models import Annotation, NameDisplayMode
+
+# https://simbad.cds.unistra.fr/Pages/guide/sim-url.htx -- confirmed live: most of this
+# app's own catalog_name strings resolve directly as SIMBAD identifiers (M42, NGC5471,
+# IC420, Sh2-155, and Greek-letter Bayer names like "ξ Cyg", which resolves the same as
+# its Latin transliteration "ksi Cyg"). Public (not module-private) and standalone (no
+# Qt dependency) so gui/main_window.py's canvas right-click menu can build the exact
+# same link as this panel's, rather than a second, drifting copy.
+_SIMBAD_URL = "https://simbad.cds.unistra.fr/simbad/sim-id?Ident={}"
+
+# Two confirmed exceptions, found by live-testing every catalog's actual format against
+# SIMBAD (per a real user report with screenshots):
+#   - LDN: Siril's own bundled ldn.csv spells this "LdN-1712" (mixed case, hyphen).
+#     SIMBAD rejects that outright ("incorrect format") but accepts "LDN 1712".
+#   - Barnard: this app's own catalog_name is "B42" (see _vii220a_row_to_annotation).
+#     SIMBAD treats bare "B42" -- and even "B 42" -- as ambiguous with unrelated
+#     catalogs (GC, Batten); only the full word "Barnard 42" resolves unambiguously.
+# Every other catalog's own catalog_name format was confirmed live to already resolve
+# correctly and needs no rewriting here.
+_SIMBAD_IDENTIFIER_FIXUPS: dict[str, re.Pattern[str]] = {
+    "ldn": re.compile(r"^LdN-(\d+)$", re.IGNORECASE),
+    "barnard": re.compile(r"^B(\d+)$", re.IGNORECASE),
+}
+_SIMBAD_IDENTIFIER_TEMPLATES = {
+    "ldn": "LDN {}",
+    "barnard": "Barnard {}",
+}
+
+
+def _simbad_identifier(catalog: str, catalog_name: str) -> str:
+    pattern = _SIMBAD_IDENTIFIER_FIXUPS.get(catalog)
+    if pattern is not None:
+        match = pattern.match(catalog_name)
+        if match is not None:
+            return _SIMBAD_IDENTIFIER_TEMPLATES[catalog].format(match.group(1))
+    return catalog_name
+
+
+def simbad_url_for(catalog: str, catalog_name: str, simbad_id: str | None = None) -> str:
+    # simbad_id (e.g. "HD 186675") comes straight from the catalog's own source data
+    # (see Annotation.simbad_id) and is preferred over catalog_name whenever present --
+    # more reliable than reconstructing/regex-fixing a display name, since it sidesteps
+    # per-catalog quirks (ambiguous Bayer letters, non-standard spellings) entirely
+    # rather than patching them one at a time as they're discovered.
+    identifier = simbad_id if simbad_id else _simbad_identifier(catalog, catalog_name)
+    return _SIMBAD_URL.format(quote(identifier))
 
 _COLUMNS = ["Visible", "Object", "Catalog", "Type", "Magnitude", "Size"]
 
@@ -149,6 +199,12 @@ class ObjectPanel(QWidget):
     select_all_requested = pyqtSignal(list)  # annotation ids currently shown in the table
     deselect_all_requested = pyqtSignal(list)  # annotation ids currently shown in the table
     reset_requested = pyqtSignal()
+    # Per user request: mirrors double-clicking a marker/label on the canvas (which
+    # already jumps to the Style panel's "Selected Object" tab) -- a single click here
+    # only selects/highlights (selection_changed above), so double-click was the
+    # natural, already-established gesture for "take me to editing this," rather than
+    # overloading the name with a second, conflicting meaning (see object_id below).
+    object_double_clicked = pyqtSignal(str)  # annotation id
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -175,6 +231,9 @@ class ObjectPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setSortingEnabled(True)
         self.table.selectionModel().currentRowChanged.connect(self._on_row_changed)
+        self.table.doubleClicked.connect(self._on_row_double_clicked)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_row_context_menu)
 
         btn_row = QHBoxLayout()
         # Named "Show"/"Hide" rather than "Select"/"Deselect" -- these toggle the
@@ -289,3 +348,25 @@ class ObjectPanel(QWidget):
         source_index = self.proxy.mapToSource(current)
         ann = self.model.annotation_at(source_index.row())
         self.selection_changed.emit(ann.id)
+
+    def _on_row_double_clicked(self, index: QModelIndex) -> None:
+        if not index.isValid():
+            return
+        source_index = self.proxy.mapToSource(index)
+        ann = self.model.annotation_at(source_index.row())
+        self.object_double_clicked.emit(ann.id)
+
+    def _show_row_context_menu(self, pos) -> None:
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        source_index = self.proxy.mapToSource(index)
+        ann = self.model.annotation_at(source_index.row())
+        menu = QMenu(self)
+        # Per user request: not offered for custom (manually-placed) objects -- a
+        # comet, a satellite trail, a typo'd name has no real catalog identifier for
+        # SIMBAD to resolve, unlike every real catalog object's own catalog_name.
+        simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
+        chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
+        if chosen is simbad_action and simbad_action is not None:
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name, ann.simbad_id)))

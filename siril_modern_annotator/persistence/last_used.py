@@ -127,6 +127,12 @@ def save_last_used_overlay_settings(settings: OverlaySettings) -> None:
             "background_opacity": settings.info_box.background_opacity,
             "text_color": settings.info_box.text_color,
         },
+        "constellations": {
+            "enabled": settings.constellations.enabled,
+            "color": settings.constellations.color,
+            "opacity": settings.constellations.opacity,
+            "show_labels": settings.constellations.show_labels,
+        },
     }
     _settings().setValue(_OVERLAY_KEY, json.dumps(data))
 
@@ -185,5 +191,20 @@ def apply_last_used_overlay_settings(defaults: OverlaySettings) -> OverlaySettin
             defaults.info_box.corner = InfoBoxCorner(info_box["corner"])
     except Exception:
         logger.exception("Failed to apply saved info box overlay settings; using resolution-scaled defaults")
+
+    constellations = data.get("constellations") or {}
+    try:
+        defaults.constellations.enabled = bool(
+            constellations.get("enabled", defaults.constellations.enabled)
+        )
+        defaults.constellations.color = str(constellations.get("color", defaults.constellations.color))
+        defaults.constellations.opacity = float(
+            constellations.get("opacity", defaults.constellations.opacity)
+        )
+        defaults.constellations.show_labels = bool(
+            constellations.get("show_labels", defaults.constellations.show_labels)
+        )
+    except Exception:
+        logger.exception("Failed to apply saved constellation overlay settings; using resolution-scaled defaults")
 
     return defaults
