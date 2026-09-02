@@ -446,6 +446,51 @@ class Sh2CorrectedPositionProvider(CatalogProvider):
         return results
 
 
+class RcwCorrectedPositionProvider(CatalogProvider):
+    """Supplies only ra/dec for existing RCW designations, from
+    rcw_corrected_positions.CORRECTED_RCW_POSITIONS. Mirrors Sh2CorrectedPositionProvider
+    exactly (same source, same "positions only" scope, same reasoning) -- see that
+    class's and rcw_corrected_positions.py's own docstrings. Meant to be registered
+    *first* in CompositeProvider's provider list (see gui/main_window.py's
+    _catalog_provider) so its position wins the same-designation dedup tie over
+    VizierProvider's VII/216 -- catalog_name/angular_size/etc. still get backfilled
+    from VII/216 via the existing merge logic, completely unaffected by this change."""
+
+    @property
+    def available_catalogs(self) -> set[str]:
+        return {"rcw"}
+
+    def query(
+        self,
+        wcs: SirilWcs,
+        catalogs: set[str],
+        mag_limit: float | None = None,
+    ) -> list[Annotation]:
+        from .rcw_corrected_positions import CORRECTED_RCW_POSITIONS
+
+        if "rcw" not in catalogs:
+            return []
+        margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
+        results: list[Annotation] = []
+        for num, (ra, dec) in CORRECTED_RCW_POSITIONS.items():
+            x, y = wcs.world_to_pixel(ra, dec)
+            if not wcs.in_bounds(np.array([x]), np.array([y]), margin_px=margin_px)[0]:
+                continue
+            results.append(
+                Annotation(
+                    catalog="rcw",
+                    catalog_name=f"RCW {num}",
+                    ra=ra,
+                    dec=dec,
+                    image_x=float(x),
+                    image_y=float(y),
+                    object_type="nebula",
+                    priority=default_priority_for_catalog("rcw"),
+                )
+            )
+        return results
+
+
 # ----------------------------------------------------------------------- GumProvider ----
 # Per GitHub issue #10, same source as Sh2CorrectedPositionProvider above -- Kevin
 # Jardine's Integrated HII Regions catalog isn't on VizieR, so this is bundled as a
