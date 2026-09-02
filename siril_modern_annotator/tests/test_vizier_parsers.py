@@ -31,6 +31,7 @@ from siril_modern_annotator.annotation.catalogs import (
     _vii20_row_to_annotation,
     _vii118_row_to_annotation,
     _vii220a_row_to_annotation,
+    _vii9_row_to_annotation,
     bayer_designation_to_greek,
 )
 from siril_modern_annotator.annotation.wcs import SirilWcs
@@ -339,6 +340,59 @@ def test_vii220a_malformed_coordinates_return_none_not_crash():
     table = _vii220a_table([["33", "05 34 36", "-02 32", 4.0, "not-a-coord", "-02 27 57"]])
     wcs = _wcs_at(85.22, -2.466)
     assert _vii220a_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- VII/9 (Lynds' Catalogue of Bright Nebulae) -- real row from a live query near ------
+# --- Cygnus. Same shape as VII/220A above: native RA1950/DE1950 are minute-precision -----
+# --- only and B1950, so this parser uses VizieR's own pre-converted _RA.icrs/_DE.icrs -----
+# --- instead, same as the Barnard parser does. ---------------------------------------------
+
+_VII9_COLUMNS = ["Seq", "Diam1", "_RA.icrs", "_DE.icrs"]
+
+
+def _vii9_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII9_COLUMNS, dtype=[str, "float32", str, str])
+
+
+def test_vii9_real_row_parses_as_lbn():
+    table = _vii9_table([["245", 45.0, "20 27 49.0", "+39 59 59"]])
+    wcs = _wcs_at(306.954, 39.9997)
+    ann = _vii9_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "lbn"
+    assert ann.catalog_name == "LBN 245"
+    assert ann.object_type == "nebula"
+    assert ann.angular_size == 45.0
+    assert ann.magnitude is None  # nebulae have no point-source magnitude
+    assert ann.ra == pytest.approx(306.954, abs=0.01)
+    assert ann.dec == pytest.approx(39.9997, abs=0.01)
+
+
+def test_vii9_missing_diameter_still_parses():
+    table = _vii9_table([["245", float("nan"), "20 27 49.0", "+39 59 59"]])
+    wcs = _wcs_at(306.954, 39.9997)
+    ann = _vii9_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog_name == "LBN 245"
+    assert ann.angular_size is None
+
+
+def test_vii9_missing_seq_number_returns_none():
+    table = _vii9_table([["", 45.0, "20 27 49.0", "+39 59 59"]])
+    wcs = _wcs_at(306.954, 39.9997)
+    assert _vii9_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii9_object_outside_field_is_dropped():
+    table = _vii9_table([["245", 45.0, "20 27 49.0", "+39 59 59"]])
+    wcs = _wcs_at(85.22, -2.466)  # Orion field -- nowhere near LBN 245
+    assert _vii9_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii9_malformed_coordinates_return_none_not_crash():
+    table = _vii9_table([["245", 45.0, "not-a-coord", "+39 59 59"]])
+    wcs = _wcs_at(306.954, 39.9997)
+    assert _vii9_row_to_annotation(table[0], wcs, None) is None
 
 
 # --- _run_with_hard_timeout ------------------------------------------------------------

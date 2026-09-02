@@ -294,6 +294,11 @@ CATALOG_PRIORITY: dict[str, int] = {
     # more commonly cited name for these in astrophotography circles (e.g. the
     # Horsehead's dark patch as "B33"), so Barnard wins the on-image label.
     "barnard": 24,
+    # Least commonly cited name among the deep-sky catalogs above for a shared object
+    # (e.g. an LBN nebula that's also cataloged as Sh2/IC/NGC) -- those catalogs' names
+    # are the ones astrophotographers actually use, so LBN only wins the display name
+    # when nothing else covers the same object.
+    "lbn": 26,
     "bright_star": 30,
     # A deliberately, individually searched-and-confirmed object (Siril's own
     # Annotate > Search Object), so it outranks the generic catalogs -- but not "user"
