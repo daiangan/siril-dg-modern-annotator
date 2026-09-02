@@ -848,6 +848,7 @@ class CompositeProvider(CatalogProvider):
                         ann.common_name = ann.common_name or existing.common_name
                         ann.magnitude = ann.magnitude if ann.magnitude is not None else existing.magnitude
                         ann.angular_size = ann.angular_size if ann.angular_size is not None else existing.angular_size
+                        ann.simbad_id = ann.simbad_id or existing.simbad_id
                         kept[kept.index(existing)] = ann
                     else:
                         # Prefer the richer record (has common_name/object_type/magnitude)
@@ -861,6 +862,15 @@ class CompositeProvider(CatalogProvider):
                             existing.magnitude = ann.magnitude
                         if ann.angular_size is not None and existing.angular_size is None:
                             existing.angular_size = ann.angular_size
+                        # Fixes a real report: Siril's own bundled stars.csv (read by
+                        # LocalCsvProvider, which wins bright_star's display name/
+                        # position) names some stars with a bare lowercase Bayer letter
+                        # ("b01 Cyg") that SIMBAD can't resolve on its own -- but VizieR's
+                        # V/50 cross-references the same star (matched here by position)
+                        # to a reliable HD/HR number, so pull it in as this object's
+                        # simbad_id without touching its display name.
+                        if ann.simbad_id and not existing.simbad_id:
+                            existing.simbad_id = ann.simbad_id
                         # LocalCsvProvider has no real object-type data and sets this to
                         # the catalog name itself as a placeholder (e.g. "ngc") -- VII/118
                         # (via VizierProvider) does carry a real NGC2000.0 type code, so
