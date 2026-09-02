@@ -1192,6 +1192,18 @@ class CompositeProvider(CatalogProvider):
                         ann.magnitude = ann.magnitude if ann.magnitude is not None else existing.magnitude
                         ann.angular_size = ann.angular_size if ann.angular_size is not None else existing.angular_size
                         ann.simbad_id = ann.simbad_id or existing.simbad_id
+                        # Same fix as simbad_id above, for the same reason: galaxy
+                        # shape enrichment (see VizierProvider._enrich_galaxy_shapes)
+                        # only ever runs on VizierProvider's own freshly-parsed
+                        # results, before CompositeProvider ever sees them -- without
+                        # carrying these three fields across the merge, a galaxy that
+                        # also has a LocalCsvProvider entry (e.g. any Messier object,
+                        # via messier.csv) would silently lose its fitted-ellipse data
+                        # here even though VizierProvider correctly attached it.
+                        if ann.galaxy_major_axis_arcmin is None:
+                            ann.galaxy_major_axis_arcmin = existing.galaxy_major_axis_arcmin
+                            ann.galaxy_minor_axis_arcmin = existing.galaxy_minor_axis_arcmin
+                            ann.galaxy_position_angle_screen_deg = existing.galaxy_position_angle_screen_deg
                         kept[kept.index(existing)] = ann
                     else:
                         # Prefer the richer record (has common_name/object_type/magnitude)
@@ -1214,6 +1226,16 @@ class CompositeProvider(CatalogProvider):
                         # simbad_id without touching its display name.
                         if ann.simbad_id and not existing.simbad_id:
                             existing.simbad_id = ann.simbad_id
+                        # This is the branch that actually fires for a Messier galaxy
+                        # in real use (LocalCsvProvider wins the tie -- see the
+                        # comment above this else -- so `existing` is the local-CSV
+                        # entry that survives): pull the shape data VizierProvider
+                        # attached to `ann` across, same reasoning as the mirror-image
+                        # fix in the `if` branch above.
+                        if ann.galaxy_major_axis_arcmin is not None and existing.galaxy_major_axis_arcmin is None:
+                            existing.galaxy_major_axis_arcmin = ann.galaxy_major_axis_arcmin
+                            existing.galaxy_minor_axis_arcmin = ann.galaxy_minor_axis_arcmin
+                            existing.galaxy_position_angle_screen_deg = ann.galaxy_position_angle_screen_deg
                         # LocalCsvProvider has no real object-type data and sets this to
                         # the catalog name itself as a placeholder (e.g. "ngc") -- VII/118
                         # (via VizierProvider) does carry a real NGC2000.0 type code, so
