@@ -361,6 +361,58 @@ def count_local_catalog_entries(catalogue_dir: Path, filename: str) -> int:
         return sum(1 for _ in csv.DictReader(fh))
 
 
+# ----------------------------------------------------------- Sh2CorrectedPositionProvider ----
+# Explicitly experimental, per GitHub issue #10 and explicit user request -- see
+# sh2_corrected_positions.py's own module docstring for the full rationale and the
+# confirmed ~15-16 arcmin position errors this addresses. Self-contained on purpose so
+# it's trivially reversible: this class, its one import below, and its one registration
+# line in gui/main_window.py's _catalog_provider are the entire change.
+
+
+class Sh2CorrectedPositionProvider(CatalogProvider):
+    """Supplies only ra/dec for existing Sh2 designations, from
+    sh2_corrected_positions.CORRECTED_SH2_POSITIONS. Meant to be registered *first* in
+    CompositeProvider's provider list (see gui/main_window.py's _catalog_provider) so
+    its position wins the same-designation dedup tie over Siril's own sh2.csv and
+    VII/20 (see CompositeProvider._dedupe's same_designation path) -- catalog_name/
+    angular_size/etc. still get backfilled from those other sources via the existing
+    merge logic, completely unaffected by this change."""
+
+    @property
+    def available_catalogs(self) -> set[str]:
+        return {"sh2"}
+
+    def query(
+        self,
+        wcs: SirilWcs,
+        catalogs: set[str],
+        mag_limit: float | None = None,
+    ) -> list[Annotation]:
+        from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS
+
+        if "sh2" not in catalogs:
+            return []
+        margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
+        results: list[Annotation] = []
+        for num, (ra, dec) in CORRECTED_SH2_POSITIONS.items():
+            x, y = wcs.world_to_pixel(ra, dec)
+            if not wcs.in_bounds(np.array([x]), np.array([y]), margin_px=margin_px)[0]:
+                continue
+            results.append(
+                Annotation(
+                    catalog="sh2",
+                    catalog_name=f"Sh2-{num}",
+                    ra=ra,
+                    dec=dec,
+                    image_x=float(x),
+                    image_y=float(y),
+                    object_type="nebula",
+                    priority=default_priority_for_catalog("sh2"),
+                )
+            )
+        return results
+
+
 # VizieR catalog IDs mirroring siril-scripts/utility/Svenesis-AnnotateImage.py's proven
 # query set (RESEARCH.md #8, Option D).
 _VIZIER_CATALOGS: dict[str, str] = {

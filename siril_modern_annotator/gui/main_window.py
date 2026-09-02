@@ -42,6 +42,7 @@ from ..annotation.catalogs import (
     USER_CATALOG_FILES,
     CompositeProvider,
     LocalCsvProvider,
+    Sh2CorrectedPositionProvider,
     VizierProvider,
     count_local_catalog_entries,
     vizier_is_available,
@@ -581,7 +582,15 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------- catalog fetching ----
 
     def _catalog_provider(self) -> CompositeProvider:
-        # Local first, VizieR second: when the same object comes back from both (e.g.
+        # Sh2CorrectedPositionProvider first, ahead of everything else: explicitly
+        # experimental (GitHub issue #10 + explicit user request), see its own and
+        # sh2_corrected_positions.py's docstrings for the confirmed ~15-16 arcmin
+        # position-error rationale. "First arrival wins the same-designation dedup tie"
+        # (see the comment below) is exactly what makes this work -- delete this one
+        # line (and the two files it references) to fully revert if verification in
+        # Siril doesn't bear this out.
+        #
+        # Local next, VizieR after that: when the same object comes back from both (e.g.
         # NGC/IC/Messier from VII/118 vs Siril's own bundled CSV) and CompositeProvider's
         # dedup ties on catalog priority, it keeps whichever result arrived first -- see
         # _dedupe's own comment on VII/118's RAB2000/DEB2000 being low precision (only
@@ -590,7 +599,11 @@ class MainWindow(QMainWindow):
         # coarser coordinates were arriving (and therefore winning) first. Local's finer
         # position now wins that tie; VII/118 still contributes richer object-type data
         # via _dedupe's enrichment step.
-        providers: list = [LocalCsvProvider(self.bridge.get_system_catalogue_dir()), VizierProvider()]
+        providers: list = [
+            Sh2CorrectedPositionProvider(),
+            LocalCsvProvider(self.bridge.get_system_catalogue_dir()),
+            VizierProvider(),
+        ]
         # "user_dso": Siril's own Astrometry > Annotate > Search Object list -- lives in
         # a different, writable directory (get_user_catalogue_dir(), not
         # get_system_catalogue_dir()), via a newer sirilpy accessor
