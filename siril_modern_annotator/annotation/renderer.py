@@ -119,6 +119,35 @@ def compute_marker_geometry(
     object's full catalog size -- callers pass a fraction of the image dimensions."""
     style = ann.effective_marker_style(global_style)
     style = replace(style, color=resolve_marker_color(ann, global_style, catalog_colors))
+    x, y = ann.effective_marker_position()
+
+    # Real isophote shape data (see annotation/catalogs.py's galaxy-shape-enrichment
+    # section) takes priority over whatever shape the *global* default preset happens
+    # to use -- per explicit user request, a galaxy we have a real fitted ellipse for
+    # should render as that ellipse automatically, not the plain circle/crosshair/etc.
+    # every other object defaults to. Only when ann.marker_style is still None, though
+    # -- a real per-object override (the user manually editing this specific object's
+    # style) must always win, same "still fully editable/override-able afterward"
+    # precedence every other auto-derived marker property in this app already follows.
+    if (
+        ann.marker_style is None
+        and ann.galaxy_major_axis_arcmin is not None
+        and ann.galaxy_minor_axis_arcmin is not None
+        and ann.galaxy_position_angle_screen_deg is not None
+        and arcsec_per_px
+    ):
+        major_radius_px = (ann.galaxy_major_axis_arcmin * 60.0 / 2.0) / arcsec_per_px
+        minor_radius_px = (ann.galaxy_minor_axis_arcmin * 60.0 / 2.0) / arcsec_per_px
+        if max_radius_px is not None and major_radius_px > max_radius_px:
+            scale = max_radius_px / major_radius_px
+            major_radius_px *= scale
+            minor_radius_px *= scale
+        return MarkerGeometry(
+            x=x, y=y, radius=major_radius_px, style=replace(style, shape=MarkerShape.ELLIPSE),
+            radius_x=major_radius_px, radius_y=minor_radius_px,
+            rotation_deg=ann.galaxy_position_angle_screen_deg,
+        )
+
     radius = style.radius
     # ELLIPSE is manual-only (see MarkerStyle.radius_x's docstring) -- skip the
     # angular-size auto-scaling entirely rather than applying it to a field
@@ -129,7 +158,6 @@ def compute_marker_geometry(
         radius = max(radius, angular_radius_arcsec / arcsec_per_px)
         if max_radius_px is not None:
             radius = min(radius, max_radius_px)
-    x, y = ann.effective_marker_position()
     if style.shape is MarkerShape.ELLIPSE:
         radius_x, radius_y = style.radius_x, style.radius_y
         radius = max(radius_x, radius_y)

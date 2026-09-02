@@ -28,6 +28,7 @@ import csv
 import logging
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -782,6 +783,135 @@ def vizier_is_available() -> bool:
     return _vizier_available
 
 
+# --------------------------------------------------------- galaxy shape enrichment ----
+# Per explicit user request/analysis of GitHub issue #9: auto-orient a galaxy's marker
+# as an ellipse matching its real shape, instead of a plain circle, using real isophote
+# diameter/axis-ratio/position-angle data -- neither exists on VII/118 (Messier/NGC/IC's
+# own source, confirmed live: its only size field is a single scalar, no axis ratio or
+# position angle at all) nor on any nebula/cluster catalog in this module, so this is
+# deliberately galaxy-only. Two sources, tried in order:
+#   - J/ApJS/269/3/sga2020 (Siena Galaxy Atlas 2020, Moustakas+ 2023): the modern,
+#     preferred source (deeper mu=26 mag/arcsec^2 isophote -> a fuller envelope than the
+#     older D25 data below) -- but confirmed live it does NOT cover every galaxy: M31
+#     itself returns zero rows even at a 1 degree search radius, almost certainly
+#     because its automated ellipse-fitting pipeline can't handle a galaxy that large.
+#   - VII/237 (HyperLeda/PGC2003, Paturel+ 2003): fallback for whatever SGA2020 doesn't
+#     have (confirmed live: does cover M31-scale objects), using the older, shallower
+#     D25 isophote -- a looser fit, but still far better than a plain circle.
+# Neither is a queryable catalog in its own right (not in _VIZIER_CATALOGS/
+# SUPPORTED_CATALOGS) -- both are enrichment-only, applied on top of already-parsed
+# messier/ngc/ic galaxy annotations by VizierProvider._enrich_galaxy_shapes.
+
+
+@dataclass(frozen=True)
+class _GalaxyShape:
+    ra: float
+    dec: float
+    major_arcmin: float
+    minor_arcmin: float
+    pa_deg: float  # position angle, measured east of north, per both sources' convention
+
+
+def _sga2020_row_to_shape(row) -> "_GalaxyShape | None":
+    """SGA2020's own schema, confirmed live via VizieR column metadata: D26 is already
+    the major-axis diameter in arcmin (mu=26 mag/arcsec^2 r-band isophote), b/a is
+    already a plain linear minor/major axis ratio (not logged), RAJ2000/DEJ2000 are
+    plain decimal degrees -- no unit conversion or sexagesimal parsing needed at all."""
+    ra, dec = _safe_float(_row_str(row, "RAJ2000")), _safe_float(_row_str(row, "DEJ2000"))
+    major = _safe_float(_row_str(row, "D26"))
+    axis_ratio = _safe_float(_row_str(row, "b/a"))
+    pa = _safe_float(_row_str(row, "PA"))
+    if None in (ra, dec, major, axis_ratio, pa):
+        return None
+    return _GalaxyShape(ra=ra, dec=dec, major_arcmin=major, minor_arcmin=major * axis_ratio, pa_deg=pa)
+
+
+def _vii237_row_to_shape(row) -> "_GalaxyShape | None":
+    """VII/237 (HyperLeda)'s own schema, confirmed live via VizieR column metadata:
+    logD25 is log10(D25) in units of 0.1 arcmin (standard RC3/LEDA convention -- D25_
+    arcmin = 10**logD25 / 10), logR25 is log10(major/minor axis ratio) (so minor =
+    major / 10**logR25). PA is confirmed live to be the *B1950* position angle (its own
+    column description says so) -- precession rotates this by at most about a degree
+    over the ~75-year span to J2000, negligible next to the visual approximation of
+    using a simple ellipse at all, so it's used as-is rather than precessed. Despite the
+    "J2000" column names, RAJ2000/DEJ2000 are confirmed live to be sexagesimal strings
+    ("00 42 41.8"), not decimal degrees -- unlike SGA2020 above."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    ra_str, dec_str = _row_str(row, "RAJ2000"), _row_str(row, "DEJ2000")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+    log_d25 = _safe_float(_row_str(row, "logD25"))
+    log_r25 = _safe_float(_row_str(row, "logR25"))
+    pa = _safe_float(_row_str(row, "PA"))
+    if log_d25 is None or log_r25 is None or pa is None:
+        return None
+    major = (10.0**log_d25) / 10.0
+    minor = major / (10.0**log_r25)
+    return _GalaxyShape(ra=ra, dec=dec, major_arcmin=major, minor_arcmin=minor, pa_deg=pa)
+
+
+# (vizier_id, row_parser), tried in order -- SGA2020 first (better/deeper isophote),
+# VII/237 only as a fallback for what SGA2020 doesn't cover (see module comment above).
+_GALAXY_SHAPE_SOURCES = (
+    ("J/ApJS/269/3/sga2020", _sga2020_row_to_shape),
+    ("VII/237", _vii237_row_to_shape),
+)
+
+# Wider than CompositeProvider's own 30" dedupe radius -- galaxy annotations here come
+# from VII/118, whose own RAB2000/DEB2000 are low precision (~0.1min RA / 1' Dec, i.e.
+# up to ~30-60" of rounding error, the same imprecision already documented on
+# _DEEP_SKY_CATALOGS' same-designation dedup fallback above); confirmed by a real case
+# while building this feature -- M31's VII/118 position and its VII/237/HyperLeda shape
+# position differed by ~35", which a 30" radius would have missed entirely, silently
+# leaving M31 (the whole reason for the HyperLeda fallback in the first place) without
+# a shape. Still tight enough, relative to typical inter-galaxy separation in an
+# uncrowded field, to avoid mismatching to a different nearby background galaxy.
+_GALAXY_SHAPE_MATCH_RADIUS_ARCSEC = 90.0
+
+
+def _position_angle_to_screen_rotation_deg(wcs: SirilWcs, ra: float, dec: float, pa_deg: float) -> float:
+    """Converts a sky position angle (degrees, measured east of north) at (ra, dec)
+    into the equivalent MarkerStyle.rotation_deg (screen-space, matching how
+    QPainter.rotate() -- see gui/annotation_item.py's ellipse drawing -- rotates an
+    ellipse whose un-rotated radius_x lies along the screen's horizontal axis).
+
+    Same projection technique as compute_compass_geometry's own north/east arrows
+    (annotation/renderer.py) rather than a fixed formula: a flat "PA -> screen angle"
+    offset would silently break for any image whose WCS carries real rotation or an
+    axis flip, which a plate-solved astrophotography frame can absolutely have. Instead
+    this projects a real point a small angular distance away *in the PA direction* (the
+    same great-circle offset math the compass uses for its own north/east vectors) and
+    measures the actual resulting on-screen angle -- correct for any WCS orientation."""
+    delta_deg = 0.01  # small enough to be locally linear, same value as the compass's own _COMPASS_ANGULAR_DELTA_DEG
+    cos_dec = max(np.cos(np.radians(dec)), 1e-6)
+    pa_rad = np.radians(pa_deg)
+    target_ra = ra + delta_deg * np.sin(pa_rad) / cos_dec
+    target_dec = dec + delta_deg * np.cos(pa_rad)
+    ax, ay = wcs.world_to_pixel(ra, dec)
+    tx, ty = wcs.world_to_pixel(target_ra, target_dec)
+    return float(np.degrees(np.arctan2(ty - ay, tx - ax)))
+
+
+def _nearest_galaxy_shape(ra: float, dec: float, shapes: list[_GalaxyShape]) -> "_GalaxyShape | None":
+    if not shapes:
+        return None
+    threshold_deg = _GALAXY_SHAPE_MATCH_RADIUS_ARCSEC / 3600.0
+    best: _GalaxyShape | None = None
+    best_dist = threshold_deg
+    for shape in shapes:
+        dist = max(abs(shape.ra - ra), abs(shape.dec - dec))  # cheap box distance, adequate at this small a scale
+        if dist <= best_dist:
+            best, best_dist = shape, dist
+    return best
+
+
 class VizierProvider(CatalogProvider):
     """Queries VizieR for objects in the field. Network-bound: callers should run this
     inside a worker thread (see gui/workers.py), never on the Qt main thread.
@@ -859,7 +989,81 @@ class VizierProvider(CatalogProvider):
             # catalog key, so this is a no-op for them either way.
             results.extend(ann for ann in parsed if ann.catalog in catalogs)
 
+        self._enrich_galaxy_shapes(results, wcs)
         return results
+
+    def _enrich_galaxy_shapes(self, annotations: list[Annotation], wcs: SirilWcs) -> None:
+        """Mutates matching galaxy Annotations in place, setting their
+        galaxy_major_axis_arcmin/galaxy_minor_axis_arcmin/
+        galaxy_position_angle_screen_deg fields from SGA2020/HyperLeda (see the galaxy-
+        shape-enrichment section above) instead of leaving them at None. Deliberately
+        plain catalog *data*, not a marker_style override (see Annotation's own
+        docstring for why) -- compute_marker_geometry decides at render time whether/
+        how to turn this into an oriented ellipse, the same way it already does for
+        angular_size-driven circle scaling. Best-effort and strictly additive: any
+        failure here (network, malformed data, nothing found) just leaves those
+        objects rendering as plain circles, exactly as they already do today."""
+        from astropy import units as u
+        from astropy.coordinates import SkyCoord
+        from astroquery.vizier import Vizier
+
+        global _vizier_available
+        if not _vizier_available:
+            return
+        galaxies = [
+            a for a in annotations
+            if a.catalog in ("messier", "ngc", "ic") and a.object_type == "galaxy"
+        ]
+        if not galaxies:
+            return
+
+        fov = wcs.field_of_view()
+        center = SkyCoord(ra=fov.center_ra * u.deg, dec=fov.center_dec * u.deg)
+        radius = max(fov.width_deg, fov.height_deg) / 2.0 * 1.05 * u.deg
+
+        remaining = list(galaxies)
+        for vizier_id, row_parser in _GALAXY_SHAPE_SOURCES:
+            if not remaining:
+                break
+            v = Vizier(columns=["*"], row_limit=self.row_limit, timeout=15)
+            try:
+                table_list = _run_with_hard_timeout(
+                    lambda v=v, vizier_id=vizier_id: v.query_region(center, radius=radius, catalog=vizier_id),
+                    timeout_seconds=15,
+                )
+            except Exception as exc:
+                # Enrichment-only: unlike the main catalog loop above, a failure here
+                # never flips the circuit breaker or aborts the base catalog fetch --
+                # those objects just keep rendering as plain circles, same as today.
+                logger.warning(
+                    "Galaxy-shape enrichment query failed for %s (%s): %s",
+                    vizier_id, type(exc).__name__, exc,
+                )
+                continue
+            if not table_list:
+                continue
+            shapes: list[_GalaxyShape] = []
+            for row in table_list[0]:
+                try:
+                    shape = row_parser(row)
+                except Exception:
+                    logger.exception("Failed to parse a galaxy-shape row from %s", vizier_id)
+                    continue
+                if shape is not None:
+                    shapes.append(shape)
+
+            still_remaining = []
+            for ann in remaining:
+                shape = _nearest_galaxy_shape(ann.ra, ann.dec, shapes)
+                if shape is None:
+                    still_remaining.append(ann)
+                    continue
+                ann.galaxy_major_axis_arcmin = shape.major_arcmin
+                ann.galaxy_minor_axis_arcmin = shape.minor_arcmin
+                ann.galaxy_position_angle_screen_deg = _position_angle_to_screen_rotation_deg(
+                    wcs, ann.ra, ann.dec, shape.pa_deg
+                )
+            remaining = still_remaining
 
     def _rows_to_annotations(self, table, vizier_id: str, wcs: SirilWcs, mag_limit):
         parser = _VIZIER_ROW_PARSERS.get(vizier_id)

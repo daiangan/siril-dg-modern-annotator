@@ -257,6 +257,22 @@ class Annotation:
     # as SIMBAD queries even though the source data has a better identifier available.
     # None means "fall back to catalog_name-based lookup" (see object_panel.simbad_url_for).
     simbad_id: str | None = None
+    # Real isophote shape data for a galaxy (see annotation/catalogs.py's galaxy-shape-
+    # enrichment section), all three present together or not at all. Deliberately plain
+    # catalog *data*, not a marker_style override -- renderer.compute_marker_geometry
+    # auto-renders an oriented ellipse from these when present and marker_style is still
+    # None, the same way size_from_angular_size auto-scales a circle from angular_size,
+    # so per-catalog marker color/stroke_width/opacity keep resolving normally instead
+    # of being pinned to whatever a real marker_style object would carry. A user's own
+    # manual style edit sets marker_style and takes over from there, same as any other
+    # per-object override. major/minor are arcmin (same convention as angular_size,
+    # converted to native px at render time via the image's own arcsec_per_px);
+    # position_angle_screen_deg is pre-converted to on-screen rotation at enrichment
+    # time (needs the image's actual WCS orientation, which compute_marker_geometry
+    # itself deliberately never touches -- see ARCHITECTURE.md #4).
+    galaxy_major_axis_arcmin: float | None = None
+    galaxy_minor_axis_arcmin: float | None = None
+    galaxy_position_angle_screen_deg: float | None = None
 
     def display_name(self, mode: NameDisplayMode) -> str:
         if self.custom_display_name:
