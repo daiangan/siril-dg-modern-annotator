@@ -48,6 +48,7 @@ from ..annotation.catalogs import (
     count_local_catalog_entries,
     vizier_is_available,
 )
+from ..annotation.catalogs import _same_dedup_class
 from ..annotation.constellations import load_constellation_lines, load_constellation_names
 from ..annotation.layout import auto_arrange
 from ..annotation.models import (
@@ -725,11 +726,24 @@ class MainWindow(QMainWindow):
         # De-dupe against what's already loaded (angular proximity, same rule as
         # CompositeProvider) so re-enabling a catalog doesn't duplicate objects another
         # already-active catalog also happens to carry (e.g. Messier + NGC overlap).
+        # Must also respect _same_dedup_class() -- not just raw proximity -- or a point
+        # catalog (e.g. WR) sitting physically inside a deep-sky object it's not a
+        # duplicate of (e.g. WR136 is NGC6888/the Crescent Nebula's central star, ~2-3"
+        # apart) gets silently dropped when toggled on after the other. Confirmed real
+        # report: toggling WR on, then NGC on, hid NGC6888 entirely; toggling either
+        # catalog on first "wins" and the other's coincident object never appears.
+        # CompositeProvider._dedupe() already gets this right -- this mirrors it exactly
+        # rather than the plain-proximity check this used to do.
         threshold_deg = 30.0 / 3600.0
         existing = self.annotations
         new_ones = [
             r for r in results
-            if not any(abs(r.ra - e.ra) < threshold_deg and abs(r.dec - e.dec) < threshold_deg for e in existing)
+            if not any(
+                _same_dedup_class(r.catalog, e.catalog)
+                and abs(r.ra - e.ra) < threshold_deg
+                and abs(r.dec - e.dec) < threshold_deg
+                for e in existing
+            )
         ]
         if not new_ones:
             # An ONLINE_ONLY_CATALOGS entry (no local fallback -- see that constant's
