@@ -41,6 +41,7 @@ from ..annotation.catalogs import (
     SUPPORTED_CATALOGS,
     USER_CATALOG_FILES,
     CompositeProvider,
+    GumProvider,
     LocalCsvProvider,
     Sh2CorrectedPositionProvider,
     VizierProvider,
@@ -590,6 +591,14 @@ class MainWindow(QMainWindow):
         # line (and the two files it references) to fully revert if verification in
         # Siril doesn't bear this out.
         #
+        # GumProvider next -- also bundled data from issue #10's same source (see
+        # gum_positions.py), but fully offline/permanent (not experimental like the Sh2
+        # fix above), so its position in this list doesn't matter for correctness: it's
+        # a different catalog from RCW/NGC/etc., and CompositeProvider._dedupe always
+        # lets the objectively higher-priority catalog win a same-position match
+        # regardless of arrival order (arrival order only breaks *same*-catalog ties,
+        # like Sh2CorrectedPositionProvider's own case above).
+        #
         # Local next, VizieR after that: when the same object comes back from both (e.g.
         # NGC/IC/Messier from VII/118 vs Siril's own bundled CSV) and CompositeProvider's
         # dedup ties on catalog priority, it keeps whichever result arrived first -- see
@@ -601,6 +610,7 @@ class MainWindow(QMainWindow):
         # via _dedupe's enrichment step.
         providers: list = [
             Sh2CorrectedPositionProvider(),
+            GumProvider(),
             LocalCsvProvider(self.bridge.get_system_catalogue_dir()),
             VizierProvider(),
         ]

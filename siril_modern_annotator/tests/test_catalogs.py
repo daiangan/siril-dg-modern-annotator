@@ -12,6 +12,7 @@ from siril_modern_annotator.annotation.catalogs import (
     CatalogProvider,
     CompositeProvider,
     LocalCsvProvider,
+    GumProvider,
     Sh2CorrectedPositionProvider,
     bayer_designation_to_greek,
     count_local_catalog_entries,
@@ -565,3 +566,85 @@ def test_sh2_corrected_position_provider_covers_all_312_sharpless_tagged_objects
 
     assert len(CORRECTED_SH2_POSITIONS) == 312
     assert set(CORRECTED_SH2_POSITIONS) <= set(range(1, 314))  # Sh2 numbers run 1-313
+
+
+# ------------------------------------------------------------------- GumProvider ----
+# Per GitHub issue #10, same source as Sh2CorrectedPositionProvider above -- Gum
+# (1955, southern HII regions) via Kevin Jardine's Integrated HII Regions catalog.
+
+
+def test_gum_provider_only_returns_gum():
+    provider = GumProvider()
+    assert provider.available_catalogs == {"gum"}
+
+
+def test_gum_provider_ignores_other_catalogs():
+    provider = GumProvider()
+    assert provider.query(_wcs_at(131.240583, -41.282917), {"messier"}) == []
+
+
+def test_gum_provider_returns_gum_15():
+    # 131.240583, -41.282917 is GUM_OBJECTS["Gum 15"] -- confirmed live on SIMBAD to
+    # resolve correctly (a real HII region, unlike some letter-suffixed Gum names --
+    # see gum_positions.py's own docstring).
+    provider = GumProvider()
+    results = provider.query(_wcs_at(131.240583, -41.282917), {"gum"})
+    names = {a.catalog_name for a in results}
+    assert "Gum 15" in names
+    gum15 = next(a for a in results if a.catalog_name == "Gum 15")
+    assert gum15.catalog == "gum"
+    assert gum15.object_type == "nebula"
+    assert gum15.ra == pytest.approx(131.240583)
+    assert gum15.dec == pytest.approx(-41.282917)
+    assert gum15.angular_size == pytest.approx(14.0926)
+
+
+def test_gum_provider_object_far_from_frame_is_excluded():
+    provider = GumProvider()
+    results = provider.query(_wcs_at(0.0, 0.0), {"gum"})
+    assert not any(a.catalog_name == "Gum 15" for a in results)
+
+
+def test_gum_provider_covers_all_67_gum_tagged_objects():
+    from siril_modern_annotator.annotation.gum_positions import GUM_OBJECTS
+
+    assert len(GUM_OBJECTS) == 67
+    assert "Gum nebula" in GUM_OBJECTS  # the giant Gum Nebula itself, not "Gum N"
+
+
+def test_gum_merges_with_its_rcw_cross_reference():
+    """Confirmed live before implementing: most Gum objects (47 of 67) already carry
+    an RCW cross-reference for the same physical nebula in Jardine's own data --
+    "gum" joins _DEEP_SKY_CATALOGS (same treatment RCW itself got) so those merge
+    into one marker instead of drawing twice, with RCW's own name winning (RCW's
+    priority is a lower number than Gum's, so it wins regardless of arrival order --
+    unlike Sh2CorrectedPositionProvider's same-catalog tie above, this is a genuine
+    cross-catalog priority decision, not an arrival-order one)."""
+    ra, dec = 271.180792, -23.545944  # GUM_OBJECTS["Gum 74b"], cross-referenced to RCW 146b
+    provider = CompositeProvider(
+        [
+            GumProvider(),
+            _StubProvider("rcw", "RCW 146b", ra, dec),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs_at(ra, dec), {"gum", "rcw"})
+    names = {a.catalog_name for a in results}
+    assert names == {"RCW 146b"}
+
+
+def test_gum_does_not_merge_with_an_unrelated_nearby_star():
+    """A star and an extended object can legitimately share a position without being
+    the same object -- same guard _DEEP_SKY_CATALOGS already provides for every other
+    deep-sky catalog here (see test_dedupe_never_merges_a_star_with_a_nearby_nebula)."""
+    ra, dec = 131.240583, -41.282917
+    provider = CompositeProvider(
+        [
+            GumProvider(),
+            _StubProvider("bright_star", "Test Star", ra, dec),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs_at(ra, dec), {"gum", "bright_star"})
+    names = {a.catalog_name for a in results}
+    assert names == {"Gum 15", "Test Star"}
