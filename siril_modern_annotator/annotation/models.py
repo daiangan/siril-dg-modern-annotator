@@ -234,6 +234,12 @@ class Annotation:
     connector_color: str | None = None
     connector_width: float | None = None
     custom_display_name: str | None = None
+    # A catalog-provided identifier known to resolve reliably on SIMBAD (e.g. "HD
+    # 186675"), independent of catalog_name -- some catalogs' display names (Bayer/
+    # Flamsteed strings like "b01 Cyg", Siril's "LdN-1712") are ambiguous or malformed
+    # as SIMBAD queries even though the source data has a better identifier available.
+    # None means "fall back to catalog_name-based lookup" (see object_panel.simbad_url_for).
+    simbad_id: str | None = None
 
     def display_name(self, mode: NameDisplayMode) -> str:
         if self.custom_display_name:

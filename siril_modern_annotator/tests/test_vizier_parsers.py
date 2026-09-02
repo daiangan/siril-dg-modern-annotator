@@ -227,6 +227,36 @@ def test_v50_xi_abbreviation_matches_siril_convention():
     assert ann.catalog_name == "ξ Cyg"
 
 
+def test_v50_populates_simbad_id_from_hd_even_when_name_is_present():
+    """Real report: SIMBAD rejects the reconstructed name "b01 Cyg" outright
+    ("incorrect format for catalogs") because a lowercase single-letter Bayer prefix
+    collides with several unrelated catalogs' own identifier syntax. Rather than
+    special-casing that (and the next format SIMBAD chokes on), catalog_name stays the
+    friendly display string and simbad_id carries V/50's own HD number instead --
+    confirmed live that "HD <number>" always resolves on SIMBAD."""
+    table = _v50_table([["7539", "b01Cyg", "186408", "", "", "19 58 22.0", "+35 05 00", "5.20", "0.63", "G2V", "*"]])
+    wcs = _wcs_at(299.59, 35.08)
+    ann = _v50_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.simbad_id == "HD 186408"
+
+
+def test_v50_falls_back_to_hr_when_hd_is_blank():
+    table = _v50_table([["7539", "", "", "", "", "19 58 22.0", "+35 05 00", "5.20", "0.63", "G2V", "*"]])
+    wcs = _wcs_at(299.59, 35.08)
+    ann = _v50_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.simbad_id == "HR 7539"
+
+
+def test_v50_simbad_id_is_none_when_neither_hd_nor_hr_present():
+    table = _v50_table([["", "43    Cyg", "", "", "", "20 32 00.0", "+41 00 00", "6.23", "-0.06", "B9.5Vn", "*"]])
+    wcs = _wcs_at(308.0, 41.0)
+    ann = _v50_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.simbad_id is None
+
+
 # --- VII/20 (Sharpless 1959) -- real row from a live query, B1900 equinox -----------
 
 _VII20_COLUMNS = ["Sh2", "GlLund", "GbLund", "GLon", "GLat", "RA1900", "DE1900", "Diam", "Form", "Struct", "Bright"]

@@ -41,6 +41,20 @@ def test_simbad_url_rewrites_barnard_to_the_unambiguous_full_word():
     assert simbad_url_for("barnard", "B42") == "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=Barnard%2042"
 
 
+def test_simbad_url_prefers_simbad_id_over_catalog_name_when_present():
+    # Regression test for a real report: "b01 Cyg" (V/50's reconstructed Bayer name)
+    # is rejected by SIMBAD outright, unlike a per-catalog regex fixup (see LDN/Barnard
+    # below), the data itself carries a reliable identifier (HD/HR from VizieR), so it
+    # takes precedence over any catalog_name-based guessing.
+    assert simbad_url_for("bright_star", "b01 Cyg", "HD 186408") == (
+        "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=HD%20186408"
+    )
+
+
+def test_simbad_url_falls_back_to_catalog_name_when_simbad_id_is_absent():
+    assert simbad_url_for("bright_star", "α Cyg", None) == simbad_url_for("bright_star", "α Cyg")
+
+
 def test_simbad_url_leaves_other_catalogs_unchanged():
     # Every other catalog's own catalog_name format was confirmed live to already
     # resolve correctly -- messier/ngc/ic/sh2/bright_star/user_dso all pass through.
@@ -108,6 +122,25 @@ def test_context_menu_applies_the_barnard_fixup():
     assert simbad_url_for(ann.catalog, ann.catalog_name) == (
         "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=Barnard%2042"
     )
+
+
+def test_context_menu_uses_simbad_id_when_the_annotation_has_one(monkeypatch):
+    ann = Annotation(
+        catalog="bright_star", catalog_name="b01 Cyg", ra=10.0, dec=41.0,
+        image_x=100.0, image_y=200.0, simbad_id="HD 186408",
+    )
+    panel = ObjectPanel()
+    panel.set_annotations([ann])
+
+    monkeypatch.setattr(QMenu, "exec", lambda self, *a, **kw: (self.actions() or [None])[0])
+    opened: list[str] = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+
+    panel._show_row_context_menu(_row_center(panel))
+    # toString() reformats for human readability (decodes %20 back to a space); assert
+    # on the identifier itself rather than the raw encoded bytes, as in the plain-name
+    # SIMBAD tests above.
+    assert opened == ["https://simbad.cds.unistra.fr/simbad/sim-id?Ident=HD 186408"]
 
 
 def test_context_menu_omits_simbad_for_a_custom_object(monkeypatch):

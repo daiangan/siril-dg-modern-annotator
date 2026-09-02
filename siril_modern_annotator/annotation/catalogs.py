@@ -494,7 +494,22 @@ def _v50_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Anno
         object_type="star",
         magnitude=mag,
         priority=default_priority_for_catalog("bright_star"),
+        simbad_id=_v50_simbad_id(row),
     )
+
+
+def _v50_simbad_id(row) -> str | None:
+    """V/50's HD/HR numbers are confirmed live to always resolve on SIMBAD (unlike the
+    reconstructed Bayer/Flamsteed Name string, which SIMBAD sometimes rejects or
+    misresolves -- e.g. "b01 Cyg" collides with several unrelated catalog prefixes).
+    Prefer HD (Henry Draper) since it's the more universally indexed of the two."""
+    hd = _row_str(row, "HD")
+    if hd:
+        return f"HD {hd}"
+    hr = _row_str(row, "HR")
+    if hr:
+        return f"HR {hr}"
+    return None
 
 
 def _format_v50_name(row) -> str | None:

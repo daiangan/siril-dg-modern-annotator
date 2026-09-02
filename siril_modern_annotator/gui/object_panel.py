@@ -62,8 +62,14 @@ def _simbad_identifier(catalog: str, catalog_name: str) -> str:
     return catalog_name
 
 
-def simbad_url_for(catalog: str, catalog_name: str) -> str:
-    return _SIMBAD_URL.format(quote(_simbad_identifier(catalog, catalog_name)))
+def simbad_url_for(catalog: str, catalog_name: str, simbad_id: str | None = None) -> str:
+    # simbad_id (e.g. "HD 186675") comes straight from the catalog's own source data
+    # (see Annotation.simbad_id) and is preferred over catalog_name whenever present --
+    # more reliable than reconstructing/regex-fixing a display name, since it sidesteps
+    # per-catalog quirks (ambiguous Bayer letters, non-standard spellings) entirely
+    # rather than patching them one at a time as they're discovered.
+    identifier = simbad_id if simbad_id else _simbad_identifier(catalog, catalog_name)
+    return _SIMBAD_URL.format(quote(identifier))
 
 _COLUMNS = ["Visible", "Object", "Catalog", "Type", "Magnitude", "Size"]
 
@@ -363,4 +369,4 @@ class ObjectPanel(QWidget):
         simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is simbad_action and simbad_action is not None:
-            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name)))
+            QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name, ann.simbad_id)))
