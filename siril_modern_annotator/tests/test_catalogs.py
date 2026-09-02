@@ -359,6 +359,42 @@ def test_dedupe_still_merges_same_position_across_deep_sky_catalogs():
     assert results[0].catalog_name == "M42"
 
 
+def test_dedupe_merges_rcw_with_its_ngc_cross_reference():
+    """Per explicit user decision: RCW joins the same cross-catalog dedup class as
+    messier/ngc/ic/sh2/ldn/barnard/lbn -- confirmed live on SIMBAD that RCW 53 and
+    NGC 3372 (the Carina Nebula) are the same object, so both catalogs reporting it at
+    the same position must merge into one marker, not two."""
+    ra, dec = 160.48, -59.76
+    provider = CompositeProvider(
+        [
+            _StubProvider("rcw", "RCW 53", ra, dec),
+            _StubProvider("ngc", "NGC3372", ra, dec),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"rcw", "ngc"})
+    assert len(results) == 1
+
+
+def test_dedupe_never_merges_vdb_with_a_same_position_ngc_entry():
+    """Per explicit user decision: unlike RCW, vdB is deliberately left out of the
+    cross-catalog dedup class -- each row is positioned at the *illuminating star*
+    (see _vii21_row_to_annotation's docstring), a different physical anchor than an
+    NGC/IC centroid for the same region, so merging them by position alone would be
+    wrong more often than right."""
+    ra, dec = 56.75, 24.12
+    provider = CompositeProvider(
+        [
+            _StubProvider("vdb", "vdB 20", ra, dec),
+            _StubProvider("ngc", "NGC1432", ra, dec),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"vdb", "ngc"})
+    names = {a.catalog_name for a in results}
+    assert names == {"vdB 20", "NGC1432"}
+
+
 class _PositionedStubProvider(CatalogProvider):
     """Returns one fixed-position Annotation, bypassing real WCS projection -- lets a
     test place a result exactly in-frame or out-of-frame without needing real sky

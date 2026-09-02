@@ -30,6 +30,8 @@ from siril_modern_annotator.annotation.catalogs import (
     _v50_row_to_annotation,
     _vii20_row_to_annotation,
     _vii118_row_to_annotation,
+    _vii21_row_to_annotation,
+    _vii216_row_to_annotation,
     _vii220a_row_to_annotation,
     _vii9_row_to_annotation,
     bayer_designation_to_greek,
@@ -393,6 +395,108 @@ def test_vii9_malformed_coordinates_return_none_not_crash():
     table = _vii9_table([["245", 45.0, "not-a-coord", "+39 59 59"]])
     wcs = _wcs_at(306.954, 39.9997)
     assert _vii9_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- VII/216 (Rodgers, Campbell & Whiteoak) -- real row from a live query near --------
+# --- Carina. Same shape as VII/9/VII/220A: native RAB1950/DEB1950 are minute- ---------
+# --- precision only and B1950, so this parser uses VizieR's own pre-converted --------
+# --- _RA.icrs/_DE.icrs instead. -------------------------------------------------------
+
+_VII216_COLUMNS = ["RCW", "MajAxis", "_RA.icrs", "_DE.icrs"]
+
+
+def _vii216_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII216_COLUMNS, dtype=[str, "float32", str, str])
+
+
+def test_vii216_real_row_parses_as_rcw():
+    table = _vii216_table([["53", 210.0, "10 41 55.2", "-59 45 43"]])
+    wcs = _wcs_at(160.48, -59.7619)
+    ann = _vii216_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "rcw"
+    assert ann.catalog_name == "RCW 53"
+    assert ann.object_type == "nebula"
+    assert ann.angular_size == 210.0
+    assert ann.magnitude is None  # emission regions have no point-source magnitude
+    assert ann.ra == pytest.approx(160.48, abs=0.01)
+    assert ann.dec == pytest.approx(-59.7619, abs=0.01)
+
+
+def test_vii216_missing_major_axis_still_parses():
+    table = _vii216_table([["53", float("nan"), "10 41 55.2", "-59 45 43"]])
+    wcs = _wcs_at(160.48, -59.7619)
+    ann = _vii216_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog_name == "RCW 53"
+    assert ann.angular_size is None
+
+
+def test_vii216_missing_rcw_number_returns_none():
+    table = _vii216_table([["", 210.0, "10 41 55.2", "-59 45 43"]])
+    wcs = _wcs_at(160.48, -59.7619)
+    assert _vii216_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii216_object_outside_field_is_dropped():
+    table = _vii216_table([["53", 210.0, "10 41 55.2", "-59 45 43"]])
+    wcs = _wcs_at(306.954, 39.9997)  # Cygnus field -- nowhere near RCW 53
+    assert _vii216_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii216_malformed_coordinates_return_none_not_crash():
+    table = _vii216_table([["53", 210.0, "not-a-coord", "-59 45 43"]])
+    wcs = _wcs_at(160.48, -59.7619)
+    assert _vii216_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- VII/21 (van den Bergh) -- real row from a live query near the Pleiades. ----------
+# --- Unlike every parser above, _RA/_DE are already plain J2000 decimal degrees, ------
+# --- so no sexagesimal parse/frame transform is needed at all. -----------------------
+
+_VII21_COLUMNS = ["VdB", "HD", "_RA", "_DE"]
+
+
+def _vii21_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII21_COLUMNS, dtype=[str, str, "float64", "float64"])
+
+
+def test_vii21_real_row_parses_as_vdb():
+    table = _vii21_table([["20", "23302", 56.2189, 24.11334]])
+    wcs = _wcs_at(56.75, 24.12)
+    ann = _vii21_row_to_annotation(table[0], wcs, None)
+    assert ann is not None
+    assert ann.catalog == "vdb"
+    assert ann.catalog_name == "vdB 20"
+    assert ann.object_type == "reflection nebula"
+    # This catalog carries no nebula size/magnitude field at all -- HD/SpType/Vmag in
+    # the real schema describe the illuminating star, not the nebula itself, so this
+    # parser deliberately doesn't map any of them onto angular_size/magnitude.
+    assert ann.angular_size is None
+    assert ann.magnitude is None
+    assert ann.ra == pytest.approx(56.2189, abs=1e-4)
+    assert ann.dec == pytest.approx(24.11334, abs=1e-4)
+
+
+def test_vii21_missing_vdb_number_returns_none():
+    table = _vii21_table([["", "23302", 56.2189, 24.11334]])
+    wcs = _wcs_at(56.75, 24.12)
+    assert _vii21_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii21_object_outside_field_is_dropped():
+    table = _vii21_table([["20", "23302", 56.2189, 24.11334]])
+    wcs = _wcs_at(160.48, -59.7619)  # Carina field -- nowhere near the Pleiades
+    assert _vii21_row_to_annotation(table[0], wcs, None) is None
+
+
+def test_vii21_malformed_coordinates_return_none_not_crash():
+    table = Table(
+        rows=[["20", "23302", "not-a-number", 24.11334]],
+        names=_VII21_COLUMNS, dtype=[str, str, str, "float64"],
+    )
+    wcs = _wcs_at(56.75, 24.12)
+    assert _vii21_row_to_annotation(table[0], wcs, None) is None
 
 
 # --- _run_with_hard_timeout ------------------------------------------------------------

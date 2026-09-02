@@ -82,6 +82,14 @@ SUPPORTED_CATALOGS: dict[str, str] = {
     "barnard": "Barnard Catalogue of Dark Nebulae (B)",
     # Also VizieR-only (VII/9, no bundled Siril CSV) -- same reasoning as barnard above.
     "lbn": "Lynds Catalogue of Bright Nebulae (LBN)",
+    # Also VizieR-only (VII/216) -- the southern-hemisphere counterpart to Sharpless
+    # (Sh2 is mostly northern-sky), so this fills a real gap for objects like Carina/
+    # Vela that have no Sh2 designation at all.
+    "rcw": "Rodgers, Campbell & Whiteoak Catalogue (RCW)",
+    # Also VizieR-only (VII/21). Unlike every other catalog here, each row is
+    # positioned at the *illuminating star*, not a nebula centroid -- see
+    # _vii21_row_to_annotation's own docstring.
+    "vdb": "van den Bergh Catalogue of Reflection Nebulae (vdB)",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
@@ -103,6 +111,8 @@ DEFAULT_CATALOG_COLORS: dict[str, str] = {
     "bright_star": "#F5E6A3",  # pale warm yellow
     "barnard": "#9FC9A8",  # soft sage green
     "lbn": "#D9A066",  # soft terracotta/amber
+    "rcw": "#D98C9E",  # dusty rose-red
+    "vdb": "#8EC6E0",  # soft sky blue -- reflection nebulae scatter blue light
     "user_dso": "#E3A8C4",  # dusty rose
     # Not a queryable catalog (deliberately absent from SUPPORTED_CATALOGS above --
     # see that dict's own comment), just the color user-placed custom objects render
@@ -360,6 +370,8 @@ _VIZIER_CATALOGS: dict[str, str] = {
     "barnard": "VII/220A",
     "bright_star": "V/50",
     "lbn": "VII/9",
+    "rcw": "VII/216",
+    "vdb": "VII/21",
 }
 
 # A catalog with a VizieR ID but no bundled Siril CSV (see _LOCAL_CATALOG_FILES) has no
@@ -660,6 +672,84 @@ def _vii9_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Ann
     )
 
 
+def _vii216_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/216 (Rodgers, Campbell & Whiteoak 1960 -- H-alpha emission regions in the
+    southern Milky Way). Real, confirmed schema: RCW is the catalog's own bare number;
+    native RAB1950/DEB1950 are minute-precision only and B1950, same situation as VII/9
+    and VII/220A, so this uses VizieR's own pre-converted _RA.icrs/_DE.icrs instead, same
+    pattern as those two. No magnitude field (emission regions aren't point sources);
+    MajAxis is the major-axis angular size in arcmin (MinAxis is the minor axis --
+    MajAxis alone matches the single-value angular_size convention already used for
+    VII/9/VII/20/VII/220A). "RCW <n>" confirmed live to resolve correctly on SIMBAD
+    (e.g. RCW 53 -> NGC 3372, the Carina Nebula) with no identifier fixup needed."""
+    from astropy import units as u
+    from astropy.coordinates import Angle
+
+    rcw_num = _row_str(row, "RCW")
+    if not rcw_num:
+        return None
+    ra_str, dec_str = _row_str(row, "_RA.icrs"), _row_str(row, "_DE.icrs")
+    if not ra_str or not dec_str:
+        return None
+    try:
+        ra = Angle(ra_str, unit=u.hourangle).degree
+        dec = Angle(dec_str, unit=u.deg).degree
+    except Exception:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="rcw",
+        catalog_name=f"RCW {rcw_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="nebula",
+        angular_size=_safe_float(_row_str(row, "MajAxis")),
+        priority=default_priority_for_catalog("rcw"),
+    )
+
+
+def _vii21_row_to_annotation(row, wcs: SirilWcs, mag_limit: float | None) -> "Annotation | None":
+    """VII/21 (van den Bergh 1966 -- Catalogue of Reflection Nebulae). Real, confirmed
+    schema: VdB is the catalog's own bare number; _RA/_DE are already plain J2000
+    decimal degrees (no sexagesimal parse or equinox transform needed at all, simpler
+    than every other VizieR parser here). Unlike every other nebula catalog in this
+    module, each row's own position is the *illuminating star*'s (HD/SpType/Vmag are
+    that star's data, not the nebula's) -- van den Bergh catalogued these nebulae by
+    the star that lights them, so there's no separate nebula centroid or angular size
+    to read here at all. Per explicit user decision, that different physical anchor
+    means vdB is deliberately left out of _DEEP_SKY_CATALOGS' cross-catalog dedup
+    (unlike RCW/Sh2/Barnard/LBN): its position rarely lines up with an NGC/IC
+    centroid for the same region closely enough to safely merge. "vdB <n>" confirmed
+    live to resolve correctly on SIMBAD with no identifier fixup needed."""
+    vdb_num = _row_str(row, "VdB")
+    if not vdb_num:
+        return None
+    ra, dec = _safe_float(_row_str(row, "_RA")), _safe_float(_row_str(row, "_DE"))
+    if ra is None or dec is None:
+        return None
+
+    x, y = wcs.world_to_pixel(ra, dec)
+    if not wcs.in_bounds(np.array([x]), np.array([y]))[0]:
+        return None
+
+    return Annotation(
+        catalog="vdb",
+        catalog_name=f"vdB {vdb_num}",
+        ra=ra,
+        dec=dec,
+        image_x=float(x),
+        image_y=float(y),
+        object_type="reflection nebula",
+        priority=default_priority_for_catalog("vdb"),
+    )
+
+
 # One parser per queryable VizieR catalog ID -- replaces a previous generic column-name
 # guesser (colnames.get("ra") or colnames.get("_raj2000") or ...) that silently returned
 # zero rows for every one of these catalogs: real VizieR schemas use sexagesimal-string
@@ -673,6 +763,8 @@ _VIZIER_ROW_PARSERS = {
     "VII/20": _vii20_row_to_annotation,
     "VII/220A": _vii220a_row_to_annotation,
     "VII/9": _vii9_row_to_annotation,
+    "VII/216": _vii216_row_to_annotation,
+    "VII/21": _vii21_row_to_annotation,
 }
 
 # Circuit breaker: flips off after the first VizieR connectivity failure and stays off
@@ -794,7 +886,7 @@ class VizierProvider(CatalogProvider):
 # against each other by position (the same object legitimately gets cross-referenced,
 # e.g. M42 == NGC1976), but a star catalog entry never counts as a positional duplicate
 # of anything outside its own catalog.
-_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn"}
+_DEEP_SKY_CATALOGS = {"messier", "ngc", "ic", "sh2", "ldn", "barnard", "lbn", "rcw"}
 
 
 def _same_dedup_class(catalog_a: str, catalog_b: str) -> bool:
