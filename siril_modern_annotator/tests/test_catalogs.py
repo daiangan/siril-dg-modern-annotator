@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from siril_modern_annotator.annotation.catalogs import (
     CatalogProvider,
     CompositeProvider,
@@ -173,12 +175,18 @@ class _StubProvider(CatalogProvider):
         self, catalog: str, catalog_name: str, ra: float, dec: float,
         object_type: str | None = None, image_x: float = 0.0, image_y: float = 0.0,
         simbad_id: str | None = None,
+        galaxy_major_axis_arcmin: float | None = None,
+        galaxy_minor_axis_arcmin: float | None = None,
+        galaxy_position_angle_screen_deg: float | None = None,
     ):
         self._ann = Annotation(
             catalog=catalog, catalog_name=catalog_name, ra=ra, dec=dec,
             image_x=image_x, image_y=image_y, priority=0,
             object_type=object_type if object_type is not None else catalog,
             simbad_id=simbad_id,
+            galaxy_major_axis_arcmin=galaxy_major_axis_arcmin,
+            galaxy_minor_axis_arcmin=galaxy_minor_axis_arcmin,
+            galaxy_position_angle_screen_deg=galaxy_position_angle_screen_deg,
         )
         self._catalog = catalog
 
@@ -319,6 +327,40 @@ def test_dedupe_fills_in_simbad_id_from_the_vizier_cross_reference():
     assert results[0].catalog_name == "b01 Cyg"
     assert results[0].simbad_id == "HD 191026"
     assert (results[0].image_x, results[0].image_y) == (100.0, 200.0)
+
+
+def test_dedupe_fills_in_galaxy_shape_from_the_vizier_cross_reference():
+    """Regression test for a real report: a Messier galaxy (M31/M51/M101 all
+    reproduced this) always has a messier.csv entry via LocalCsvProvider, which wins
+    the same-catalog priority tie and survives dedup unchanged (see the comment on
+    that tie above) -- but VizierProvider._enrich_galaxy_shapes only ever runs on
+    VizierProvider's own freshly-parsed results, before CompositeProvider merges them.
+    Without carrying galaxy_major_axis_arcmin/etc. across the same way simbad_id
+    already is, the surviving LocalCsvProvider-sourced annotation silently lost its
+    fitted-ellipse data -- confirmed live: every galaxy rendered as a plain circle
+    regardless of which image was tested, since every one of them was a Messier
+    object with a local CSV entry winning this exact tie."""
+    provider = CompositeProvider(
+        [
+            _StubProvider(
+                "messier", "M51", 202.4696, 47.1953, object_type="galaxy",
+                image_x=100.0, image_y=200.0,
+            ),
+            _StubProvider(
+                "messier", "M51", 202.4696, 47.1953, object_type="galaxy",
+                image_x=999.0, image_y=999.0,
+                galaxy_major_axis_arcmin=13.527, galaxy_minor_axis_arcmin=11.6427,
+                galaxy_position_angle_screen_deg=-118.38,
+            ),
+        ],
+        dedupe_radius_arcsec=30.0,
+    )
+    results = provider.query(_wcs(), {"messier"})
+    assert len(results) == 1
+    assert (results[0].image_x, results[0].image_y) == (100.0, 200.0)  # position tie unaffected
+    assert results[0].galaxy_major_axis_arcmin == pytest.approx(13.527)
+    assert results[0].galaxy_minor_axis_arcmin == pytest.approx(11.6427)
+    assert results[0].galaxy_position_angle_screen_deg == pytest.approx(-118.38)
 
 
 def test_dedupe_never_merges_a_star_with_a_nearby_nebula():

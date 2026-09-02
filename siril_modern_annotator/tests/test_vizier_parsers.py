@@ -30,9 +30,14 @@ from siril_modern_annotator.annotation.catalogs import (
     _v50_row_to_annotation,
     _vii20_row_to_annotation,
     _vii118_row_to_annotation,
+    _GalaxyShape,
+    _nearest_galaxy_shape,
+    _position_angle_to_screen_rotation_deg,
+    _sga2020_row_to_shape,
     _vii21_row_to_annotation,
     _vii216_row_to_annotation,
     _vii220a_row_to_annotation,
+    _vii237_row_to_shape,
     _vii9_row_to_annotation,
     bayer_designation_to_greek,
 )
@@ -497,6 +502,259 @@ def test_vii21_malformed_coordinates_return_none_not_crash():
     )
     wcs = _wcs_at(56.75, 24.12)
     assert _vii21_row_to_annotation(table[0], wcs, None) is None
+
+
+# --- Galaxy-shape enrichment (SGA2020 primary, VII/237/HyperLeda fallback) ------------
+# --- Real rows from live queries -- see catalogs.py's galaxy-shape-enrichment section ---
+# --- for why these two, and their exact schema quirks (SGA2020's RA/Dec/D26/b-a are ------
+# --- already plain decimal/linear; VII/237's are sexagesimal strings and log-scaled). ----
+
+_SGA2020_COLUMNS = ["RAJ2000", "DEJ2000", "D26", "b/a", "PA"]
+
+
+def _sga2020_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_SGA2020_COLUMNS, dtype=["float64", "float64", "float32", "float32", "float32"])
+
+
+def test_sga2020_real_row_parses_as_a_galaxy_shape():
+    # PGC1283207, live-queried near RA 228.377/DE 5.423.
+    table = _sga2020_table([[228.3770804, 5.4231914, 0.4947, 0.5457, 158.2]])
+    shape = _sga2020_row_to_shape(table[0])
+    assert shape is not None
+    assert shape.ra == pytest.approx(228.3770804)
+    assert shape.dec == pytest.approx(5.4231914)
+    assert shape.major_arcmin == pytest.approx(0.4947)
+    assert shape.minor_arcmin == pytest.approx(0.4947 * 0.5457)
+    assert shape.pa_deg == pytest.approx(158.2)
+
+
+def test_sga2020_missing_field_returns_none():
+    table = _sga2020_table([[228.3770804, 5.4231914, float("nan"), 0.5457, 158.2]])
+    assert _sga2020_row_to_shape(table[0]) is None
+
+
+_VII237_COLUMNS = ["RAJ2000", "DEJ2000", "logD25", "logR25", "PA"]
+
+
+def _vii237_table(rows: list[list]) -> Table:
+    return Table(rows=rows, names=_VII237_COLUMNS, dtype=[str, str, "float32", "float32", "float32"])
+
+
+def test_vii237_real_row_parses_as_a_galaxy_shape():
+    # PGC2555 (M32/NGC221), live-queried near M31.
+    table = _vii237_table([["00 42 41.8", "+40 51 58", 1.96, 0.16, 170.0]])
+    shape = _vii237_row_to_shape(table[0])
+    assert shape is not None
+    assert shape.ra == pytest.approx(10.674167, abs=1e-4)
+    assert shape.dec == pytest.approx(40.866111, abs=1e-4)
+    # 10**1.96 / 10
+    assert shape.major_arcmin == pytest.approx(9.120108, abs=1e-4)
+    # major / 10**0.16
+    assert shape.minor_arcmin == pytest.approx(6.309573, abs=1e-4)
+    assert shape.pa_deg == pytest.approx(170.0)
+
+
+def test_vii237_malformed_coordinates_return_none_not_crash():
+    table = _vii237_table([["not-a-coord", "+40 51 58", 1.96, 0.16, 170.0]])
+    assert _vii237_row_to_shape(table[0]) is None
+
+
+def test_vii237_missing_field_returns_none():
+    table = _vii237_table([["00 42 41.8", "+40 51 58", float("nan"), 0.16, 170.0]])
+    assert _vii237_row_to_shape(table[0]) is None
+
+
+def test_nearest_galaxy_shape_matches_within_radius():
+    shapes = [_GalaxyShape(ra=10.68, dec=41.27, major_arcmin=5.0, minor_arcmin=3.0, pa_deg=30.0)]
+    match = _nearest_galaxy_shape(10.6801, 41.2701, shapes)
+    assert match is shapes[0]
+
+
+def test_nearest_galaxy_shape_ignores_a_match_outside_the_radius():
+    shapes = [_GalaxyShape(ra=10.68, dec=41.27, major_arcmin=5.0, minor_arcmin=3.0, pa_deg=30.0)]
+    assert _nearest_galaxy_shape(10.68, 42.0, shapes) is None  # ~44' away -- way outside 30"
+
+
+def test_nearest_galaxy_shape_picks_the_closest_of_several_candidates():
+    shapes = [
+        _GalaxyShape(ra=10.6850, dec=41.27, major_arcmin=5.0, minor_arcmin=3.0, pa_deg=0.0),  # farther
+        _GalaxyShape(ra=10.6801, dec=41.27, major_arcmin=5.0, minor_arcmin=3.0, pa_deg=90.0),  # closer
+    ]
+    match = _nearest_galaxy_shape(10.68, 41.27, shapes)
+    assert match is shapes[1]
+
+
+def test_nearest_galaxy_shape_empty_list_returns_none():
+    assert _nearest_galaxy_shape(10.68, 41.27, []) is None
+
+
+# --- _position_angle_to_screen_rotation_deg -------------------------------------------
+# --- Verified live against a real (unrotated and rotated) synthetic WCS during ---------
+# --- development: for a plain north-up frame, PA=0 (pointing north, i.e. straight up ---
+# --- on screen) must rotate the ellipse's normally-horizontal wide axis to vertical -----
+# --- (+-90 degrees), and PA=90 (pointing east, i.e. horizontal in a standard-oriented ---
+# --- image) needs no rotation at all (0 mod 180). ---------------------------------------
+
+
+def test_position_angle_north_becomes_vertical_on_an_unrotated_wcs():
+    wcs = _wcs_at(180.0, 30.0)
+    rotation = _position_angle_to_screen_rotation_deg(wcs, 180.0, 30.0, pa_deg=0.0)
+    assert abs(abs(rotation) - 90.0) < 0.5
+
+
+def test_position_angle_east_stays_horizontal_on_an_unrotated_wcs():
+    wcs = _wcs_at(180.0, 30.0)
+    rotation = _position_angle_to_screen_rotation_deg(wcs, 180.0, 30.0, pa_deg=90.0)
+    # 0 mod 180 -- an ellipse rotated 0 or 180 degrees looks identical, so either is correct.
+    normalized = abs(rotation) % 180.0
+    assert normalized < 0.5 or normalized > 179.5
+
+
+def test_position_angle_adapts_to_a_genuinely_rotated_wcs():
+    """The whole point of projecting through world_to_pixel rather than using a flat
+    formula: a real plate-solved frame can carry rotation, and the equivalent screen
+    angle must shift by exactly that amount, not stay fixed at the unrotated-frame
+    answer."""
+    header = {
+        "NAXIS": 2, "NAXIS1": _WIDTH, "NAXIS2": _HEIGHT,
+        "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN",
+        "CRPIX1": _WIDTH / 2.0, "CRPIX2": _HEIGHT / 2.0,
+        "CRVAL1": 180.0, "CRVAL2": 30.0,
+        "CDELT1": -_PIXEL_SCALE_DEG, "CDELT2": _PIXEL_SCALE_DEG,
+        "PC1_1": 0.8660254, "PC1_2": -0.5, "PC2_1": 0.5, "PC2_2": 0.8660254,  # 30 degree rotation
+        "CUNIT1": "deg", "CUNIT2": "deg",
+    }
+    rotated_wcs = SirilWcs.from_header_dict(header, _WIDTH, _HEIGHT)
+    unrotated_wcs = _wcs_at(180.0, 30.0)
+    unrotated = _position_angle_to_screen_rotation_deg(unrotated_wcs, 180.0, 30.0, pa_deg=0.0)
+    rotated = _position_angle_to_screen_rotation_deg(rotated_wcs, 180.0, 30.0, pa_deg=0.0)
+    assert abs((rotated - unrotated) - 30.0) < 0.5 or abs((rotated - unrotated) + 30.0) < 0.5
+
+
+# --- VizierProvider._enrich_galaxy_shapes -- full pipeline, fully mocked VizieR --------
+
+
+def test_vizier_provider_enriches_a_galaxy_annotation_with_sga2020_shape(monkeypatch):
+    """End-to-end: querying "messier" (VII/118) for a field containing a galaxy, with
+    SGA2020 having a matching shape for it, must set that annotation's
+    galaxy_major_axis_arcmin/galaxy_minor_axis_arcmin/galaxy_position_angle_screen_deg
+    -- not touch marker_style (see renderer.py's compute_marker_geometry docstring on
+    why that matters for catalog color)."""
+    vii118 = _vii118_table(
+        [["5194", "Gx", "13 29.9", "+47 12", "s", "CVn", "", "11.2", "8.4", "", "!!! Whirlpool Galaxy = M51"]]
+    )
+    sga2020 = _sga2020_table([[202.4696, 47.1953, 13.527, 0.8607, 28.39]])
+
+    class _FakeVizier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query_region(self, *args, **kwargs):
+            catalog = kwargs.get("catalog")
+            if catalog == "VII/118":
+                return [vii118]
+            if catalog == "J/ApJS/269/3/sga2020":
+                return [sga2020]
+            return []
+
+    monkeypatch.setattr("astroquery.vizier.Vizier", _FakeVizier)
+    monkeypatch.setattr(catalogs_module, "_vizier_available", True)
+
+    wcs = _wcs_at(202.47, 47.20)
+    provider = VizierProvider()
+    results = provider.query(wcs, {"messier"})
+    assert len(results) == 1
+    ann = results[0]
+    assert ann.catalog_name == "M51"
+    assert ann.marker_style is None
+    assert ann.galaxy_major_axis_arcmin == pytest.approx(13.527)
+    assert ann.galaxy_minor_axis_arcmin == pytest.approx(13.527 * 0.8607)
+    assert ann.galaxy_position_angle_screen_deg is not None
+
+
+def test_vizier_provider_falls_back_to_hyperleda_when_sga2020_has_no_match(monkeypatch):
+    """The real, motivating case from GitHub issue #9's analysis: SGA2020 doesn't cover
+    M31 at all (confirmed live), so VII/237/HyperLeda must still fill in a shape."""
+    vii118 = _vii118_table(
+        [["224", "Gx", "00 42.7", "+41 16", "s", "And", "", "178.0", "3.4", "", "!!! Andromeda Galaxy = M31"]]
+    )
+    vii237 = _vii237_table([["00 42 44.3", "+41 16 09", 2.83, 0.36, 35.0]])
+
+    class _FakeVizier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query_region(self, *args, **kwargs):
+            catalog = kwargs.get("catalog")
+            if catalog == "VII/118":
+                return [vii118]
+            if catalog == "J/ApJS/269/3/sga2020":
+                return []  # confirmed live: SGA2020 has no M31 entry at all
+            if catalog == "VII/237":
+                return [vii237]
+            return []
+
+    monkeypatch.setattr("astroquery.vizier.Vizier", _FakeVizier)
+    monkeypatch.setattr(catalogs_module, "_vizier_available", True)
+
+    wcs = _wcs_at(10.68, 41.27)
+    provider = VizierProvider()
+    results = provider.query(wcs, {"messier"})
+    assert len(results) == 1
+    ann = results[0]
+    assert ann.catalog_name == "M31"
+    assert ann.galaxy_major_axis_arcmin is not None
+    assert ann.galaxy_major_axis_arcmin == pytest.approx((10.0**2.83) / 10.0)
+
+
+def test_vizier_provider_leaves_a_non_galaxy_untouched_by_shape_enrichment(monkeypatch):
+    vii118 = _vii118_table(
+        [["6989", "OC", "20 51.2", "+72 45", "s", "Cep", "", "16.0", "5.7", "", ""]]
+    )
+
+    class _FakeVizier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query_region(self, *args, **kwargs):
+            return [vii118] if kwargs.get("catalog") == "VII/118" else []
+
+    monkeypatch.setattr("astroquery.vizier.Vizier", _FakeVizier)
+    monkeypatch.setattr(catalogs_module, "_vizier_available", True)
+
+    wcs = _wcs_at(312.8, 72.75)
+    provider = VizierProvider()
+    results = provider.query(wcs, {"ngc"})
+    assert len(results) == 1
+    assert results[0].galaxy_major_axis_arcmin is None
+
+
+def test_vizier_provider_shape_enrichment_failure_does_not_break_the_base_fetch(monkeypatch):
+    """Best-effort: the SGA2020/HyperLeda queries failing outright must never take down
+    the base messier/ngc/ic catalog fetch that already succeeded."""
+    vii118 = _vii118_table(
+        [["5194", "Gx", "13 29.9", "+47 12", "s", "CVn", "", "11.2", "8.4", "", "!!! Whirlpool Galaxy = M51"]]
+    )
+
+    class _FakeVizier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query_region(self, *args, **kwargs):
+            catalog = kwargs.get("catalog")
+            if catalog == "VII/118":
+                return [vii118]
+            raise RuntimeError("simulated network failure")
+
+    monkeypatch.setattr("astroquery.vizier.Vizier", _FakeVizier)
+    monkeypatch.setattr(catalogs_module, "_vizier_available", True)
+
+    wcs = _wcs_at(202.47, 47.20)
+    provider = VizierProvider()
+    results = provider.query(wcs, {"messier"})
+    assert len(results) == 1
+    assert results[0].catalog_name == "M51"
+    assert results[0].galaxy_major_axis_arcmin is None
 
 
 # --- _run_with_hard_timeout ------------------------------------------------------------

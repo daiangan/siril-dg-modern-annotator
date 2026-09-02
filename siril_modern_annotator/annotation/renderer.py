@@ -74,9 +74,12 @@ class MarkerGeometry:
     x: float
     y: float
     # Circular-equivalent radius: max(radius_x, radius_y) for ELLIPSE, otherwise equal
-    # to both. Used by the "attached, skip the connector" distance check and as a
-    # bounding-box radius, both of which stay correct for ELLIPSE too since that max is
-    # always >= the true bounding box at any rotation (see _ellipse_anchor_point).
+    # to both. Used as a conservative bounding-box radius (always >= the true bounding
+    # box at any rotation, see _ellipse_anchor_point) -- no longer used for the
+    # "attached, skip the connector" check in compute_connector_points, which needs
+    # the *actual* boundary distance in the label's own direction instead (a real
+    # report: this flat max-axis value hugely overstated how far a large, eccentric
+    # ELLIPSE marker's label had to move before a connector appeared at all).
     radius: float
     style: MarkerStyle
     radius_x: float
@@ -119,6 +122,35 @@ def compute_marker_geometry(
     object's full catalog size -- callers pass a fraction of the image dimensions."""
     style = ann.effective_marker_style(global_style)
     style = replace(style, color=resolve_marker_color(ann, global_style, catalog_colors))
+    x, y = ann.effective_marker_position()
+
+    # Real isophote shape data (see annotation/catalogs.py's galaxy-shape-enrichment
+    # section) takes priority over whatever shape the *global* default preset happens
+    # to use -- per explicit user request, a galaxy we have a real fitted ellipse for
+    # should render as that ellipse automatically, not the plain circle/crosshair/etc.
+    # every other object defaults to. Only when ann.marker_style is still None, though
+    # -- a real per-object override (the user manually editing this specific object's
+    # style) must always win, same "still fully editable/override-able afterward"
+    # precedence every other auto-derived marker property in this app already follows.
+    if (
+        ann.marker_style is None
+        and ann.galaxy_major_axis_arcmin is not None
+        and ann.galaxy_minor_axis_arcmin is not None
+        and ann.galaxy_position_angle_screen_deg is not None
+        and arcsec_per_px
+    ):
+        major_radius_px = (ann.galaxy_major_axis_arcmin * 60.0 / 2.0) / arcsec_per_px
+        minor_radius_px = (ann.galaxy_minor_axis_arcmin * 60.0 / 2.0) / arcsec_per_px
+        if max_radius_px is not None and major_radius_px > max_radius_px:
+            scale = max_radius_px / major_radius_px
+            major_radius_px *= scale
+            minor_radius_px *= scale
+        return MarkerGeometry(
+            x=x, y=y, radius=major_radius_px, style=replace(style, shape=MarkerShape.ELLIPSE),
+            radius_x=major_radius_px, radius_y=minor_radius_px,
+            rotation_deg=ann.galaxy_position_angle_screen_deg,
+        )
+
     radius = style.radius
     # ELLIPSE is manual-only (see MarkerStyle.radius_x's docstring) -- skip the
     # angular-size auto-scaling entirely rather than applying it to a field
@@ -129,7 +161,6 @@ def compute_marker_geometry(
         radius = max(radius, angular_radius_arcsec / arcsec_per_px)
         if max_radius_px is not None:
             radius = min(radius, max_radius_px)
-    x, y = ann.effective_marker_position()
     if style.shape is MarkerShape.ELLIPSE:
         radius_x, radius_y = style.radius_x, style.radius_y
         radius = max(radius_x, radius_y)
@@ -223,7 +254,26 @@ def compute_connector_points(
     cy = (bbox.y0 + bbox.y1) / 2.0
     dx, dy = cx - marker.x, cy - marker.y
     distance = (dx**2 + dy**2) ** 0.5
-    if distance <= _ATTACHED_THRESHOLD_PX + marker.radius:
+    ux, uy = (dx / distance, dy / distance) if distance > 0 else (0.0, -1.0)
+
+    # Where the marker's own boundary sits in the label's actual direction -- computed
+    # once and reused for both the "attached" check below and the connector's start
+    # point, so they always agree. Must not be a flat marker.radius: for an ELLIPSE,
+    # that's just max(radius_x, radius_y) (the *longest* axis) -- a real report showed
+    # a galaxy's label producing no connector at all even after being dragged well
+    # clear of the drawn oval, because the drag distance was still well inside that
+    # longest-axis radius from the center for a large, eccentric marker like a galaxy's
+    # fitted ellipse. Using the true boundary distance in this specific direction fixes
+    # both the check and where the line visually starts.
+    if marker.style.shape is MarkerShape.BRACKETS:
+        off_x, off_y = _bracket_anchor_point(marker.radius, ux, uy)
+    elif marker.style.shape is MarkerShape.ELLIPSE:
+        off_x, off_y = _ellipse_anchor_point(marker.radius_x, marker.radius_y, marker.rotation_deg, ux, uy)
+    else:
+        off_x, off_y = marker.radius * ux, marker.radius * uy
+    boundary_distance = (off_x**2 + off_y**2) ** 0.5
+
+    if distance <= _ATTACHED_THRESHOLD_PX + boundary_distance:
         return None
 
     # Aim at the box's true center, stopping right at the boundary -- a real
@@ -237,15 +287,7 @@ def compute_connector_points(
     # real screenshot showed the line running from dead-center out through the
     # circle, which reads as visually wrong (Siril's own annotator, like most
     # annotation tools, starts the connector at the marker's edge).
-    ux, uy = (dx / distance, dy / distance) if distance > 0 else (0.0, -1.0)
-    if marker.style.shape is MarkerShape.BRACKETS:
-        off_x, off_y = _bracket_anchor_point(marker.radius, ux, uy)
-        start = (marker.x + off_x, marker.y + off_y)
-    elif marker.style.shape is MarkerShape.ELLIPSE:
-        off_x, off_y = _ellipse_anchor_point(marker.radius_x, marker.radius_y, marker.rotation_deg, ux, uy)
-        start = (marker.x + off_x, marker.y + off_y)
-    else:
-        start = (marker.x + marker.radius * ux, marker.y + marker.radius * uy)
+    start = (marker.x + off_x, marker.y + off_y)
 
     if connector_style is ConnectorStyle.STRAIGHT:
         return [start, edge_point]
