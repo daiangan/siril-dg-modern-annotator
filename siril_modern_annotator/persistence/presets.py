@@ -15,6 +15,7 @@ from ..annotation.models import (
     BackgroundMode,
     CompassStyle,
     ConnectorStyle,
+    ConstellationStyle,
     GridStyle,
     InfoBoxStyle,
     LabelStyle,
@@ -135,6 +136,11 @@ def default_overlay_settings_for_image(width: int, height: int) -> OverlaySettin
     # applied to the whole box's proportions rather than just its text.
     info_box_defaults = InfoBoxStyle()
     scale_factor = label_size / info_box_defaults.font_size
+    # Same "flat looks fine at one resolution, wrong at another" problem as the grid's
+    # own line stroke -- reuse the grid's fraction/floor so constellation lines read as
+    # the same subtle visual weight as the grid rather than needing a third tuned
+    # constant.
+    constellation_line_width = max(_GRID_LINE_WIDTH_MIN_PX, short_edge * _OVERLAY_LINE_WIDTH_FRACTION)
     return OverlaySettings(
         grid=GridStyle(label_font_size=label_size, line_width=grid_line_width),
         compass=CompassStyle(label_font_size=label_size, line_width=compass_line_width),
@@ -144,6 +150,7 @@ def default_overlay_settings_for_image(width: int, height: int) -> OverlaySettin
             border_radius=info_box_defaults.border_radius * scale_factor,
             margin=info_box_defaults.margin * scale_factor,
         ),
+        constellations=ConstellationStyle(label_font_size=label_size, line_width=constellation_line_width),
     )
 
 

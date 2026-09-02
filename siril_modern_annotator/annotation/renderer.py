@@ -16,11 +16,13 @@ from typing import Callable
 
 import numpy as np
 
+from .constellations import ConstellationLine, ConstellationName
 from .layout import _LABEL_GAP_MIN_PX, _LABEL_GAP_RADIUS_FRACTION, BBox
 from .models import (
     Annotation,
     CompassStyle,
     ConnectorStyle,
+    ConstellationStyle,
     DecLabelPosition,
     GridStyle,
     InfoBoxCorner,
@@ -739,6 +741,69 @@ def compute_compass_geometry(wcs: SirilWcs, style: CompassStyle) -> CompassGeome
         east_end=_scaled_end(east_x, east_y),
         style=style,
     )
+
+
+# ------------------------------------------------------------ constellations ----
+
+
+@dataclass(frozen=True)
+class ConstellationLabel:
+    x: float
+    y: float
+    text: str
+
+
+@dataclass(frozen=True)
+class ConstellationGeometry:
+    lines: list[tuple[Point, Point]]  # each entry is one segment's two endpoints
+    labels: list[ConstellationLabel]
+    style: ConstellationStyle
+
+
+def compute_constellation_geometry(
+    wcs: SirilWcs,
+    style: ConstellationStyle,
+    lines: list[ConstellationLine],
+    names: list[ConstellationName],
+) -> ConstellationGeometry:
+    """Constellation stick-figure lines + name labels, filtered to the current frame.
+
+    Unlike the RA/Dec grid above (computed procedurally from WCS math and heavily
+    oversampled per line, so an exact geometric clip at the frame edge is cheap and
+    imperceptible), each constellation line is just its two raw catalog endpoints --
+    clipping *those* to an exact frame-boundary intersection would need real
+    line/rectangle clipping for a cosmetic gain. Per explicit user decision, a segment
+    is instead kept whole (both endpoints, un-clipped) whenever at least one endpoint
+    projects inside the frame, and dropped only when *both* endpoints fall outside it
+    -- so a figure's line crossing the edge stays visible up to (and slightly past)
+    the border, instead of vanishing entirely the way naive per-point clipping would.
+    Name labels use a plain "anchor point inside the frame" filter, same idea."""
+    if not style.enabled or (not lines and not names):
+        return ConstellationGeometry(lines=[], labels=[], style=style)
+
+    out_lines: list[tuple[Point, Point]] = []
+    if lines:
+        ra0 = np.array([ln.ra0 for ln in lines])
+        dec0 = np.array([ln.dec0 for ln in lines])
+        ra1 = np.array([ln.ra1 for ln in lines])
+        dec1 = np.array([ln.dec1 for ln in lines])
+        x0, y0 = wcs.world_to_pixel(ra0, dec0)
+        x1, y1 = wcs.world_to_pixel(ra1, dec1)
+        keep = wcs.in_bounds(x0, y0) | wcs.in_bounds(x1, y1)
+        for kx0, ky0, kx1, ky1 in zip(x0[keep], y0[keep], x1[keep], y1[keep]):
+            out_lines.append(((float(kx0), float(ky0)), (float(kx1), float(ky1))))
+
+    out_labels: list[ConstellationLabel] = []
+    if style.show_labels and names:
+        ra = np.array([n.ra for n in names])
+        dec = np.array([n.dec for n in names])
+        x, y = wcs.world_to_pixel(ra, dec)
+        inside = wcs.in_bounds(x, y)
+        for nx, ny, n, keep in zip(x, y, names, inside):
+            if keep:
+                out_labels.append(ConstellationLabel(float(nx), float(ny), n.name))
+
+    return ConstellationGeometry(lines=out_lines, labels=out_labels, style=style)
 
 
 # ---------------------------------------------------------------- info box ----

@@ -107,6 +107,19 @@ def test_smaller_image_never_shrinks_grid_line_width_below_the_floor():
     assert overlay.grid.line_width == 1.0
 
 
+def test_constellation_line_width_matches_the_grid_s_scaling():
+    # Constellation lines deliberately reuse the grid's own fraction/floor (see
+    # default_overlay_settings_for_image's comment) so both read as the same subtle
+    # visual weight rather than needing a third tuned constant.
+    overlay = preset_store.default_overlay_settings_for_image(3000, 2500)
+    assert overlay.constellations.line_width == overlay.grid.line_width
+
+
+def test_constellation_label_size_matches_the_shared_overlay_label_size():
+    overlay = preset_store.default_overlay_settings_for_image(3000, 2500)
+    assert overlay.constellations.label_font_size == overlay.grid.label_font_size == overlay.compass.label_font_size
+
+
 def test_compass_line_width_at_reference_dimension_equals_the_floor():
     # 2000 = _COMPASS_LINE_WIDTH_MIN_PX / _OVERLAY_LINE_WIDTH_FRACTION, which happens to
     # match _REFERENCE_LONG_EDGE_PX above -- coincidence of the chosen constants, not a

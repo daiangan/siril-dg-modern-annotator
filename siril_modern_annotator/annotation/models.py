@@ -160,14 +160,31 @@ class InfoBoxStyle:
 
 
 @dataclass
+class ConstellationStyle:
+    """Constellation stick-figure lines + name labels -- image-level, not per-object,
+    same category as GridStyle/CompassStyle. Unlike those two, its geometry doesn't
+    come from WCS math alone: it's Siril's own bundled constellations.csv/
+    constellationsnames.csv (see annotation/constellations.py), filtered to the
+    current frame by annotation/renderer.py's compute_constellation_geometry."""
+
+    enabled: bool = False  # off by default, same reasoning as GridStyle/CompassStyle
+    color: str = "#A9B4C2"
+    opacity: float = 0.7
+    line_width: float = 1.0
+    show_labels: bool = True
+    label_font_size: float = 11.0
+
+
+@dataclass
 class OverlaySettings:
     """Bundles every image-level (as opposed to per-object) overlay -- the RA/Dec
-    grid, compass, and technical-details info box; a scale bar is a planned future
-    addition here."""
+    grid, compass, technical-details info box, and constellation lines; a scale bar is
+    a planned future addition here."""
 
     grid: GridStyle = field(default_factory=GridStyle)
     compass: CompassStyle = field(default_factory=CompassStyle)
     info_box: InfoBoxStyle = field(default_factory=InfoBoxStyle)
+    constellations: ConstellationStyle = field(default_factory=ConstellationStyle)
 
 
 @dataclass

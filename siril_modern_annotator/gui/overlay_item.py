@@ -1,6 +1,7 @@
-"""QGraphicsItem representations of the image-level overlays: the RA/Dec grid and the
-compass. Unlike annotation_item.py's MarkerItem/LabelItem/ConnectorItem (one instance
-per Annotation), each of these has exactly one instance per loaded image.
+"""QGraphicsItem representations of the image-level overlays: the RA/Dec grid, the
+compass, and the constellation lines. Unlike annotation_item.py's MarkerItem/LabelItem/
+ConnectorItem (one instance per Annotation), each of these has exactly one instance per
+loaded image.
 
 Same coordinate convention as annotation_item.py: native image pixel space, so no
 manual preview<->native conversion is needed here either. Geometry comes from
@@ -15,9 +16,11 @@ from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsObject, QStyleOptionGraphicsItem, QWidget
 
-from ..annotation.models import CompassStyle, GridStyle, InfoBoxStyle
+from ..annotation.constellations import ConstellationLine, ConstellationName
+from ..annotation.models import CompassStyle, ConstellationStyle, GridStyle, InfoBoxStyle
 from ..annotation.renderer import (
     compute_compass_geometry,
+    compute_constellation_geometry,
     compute_grid_geometry,
     compute_info_box_geometry,
     place_grid_label_point,
@@ -101,6 +104,66 @@ class GridItem(QGraphicsItem):
                     QPointF(-text_width / 2.0, (metrics.ascent() - metrics.descent()) / 2.0), label.text
                 )
                 painter.restore()
+
+
+class ConstellationLinesItem(QGraphicsItem):
+    """Stick-figure lines + name labels. Non-interactive for the same reason/fix as
+    GridItem above (empty shape() so it never eats a click meant for a marker/label
+    underneath it)."""
+
+    def __init__(
+        self,
+        wcs: SirilWcs,
+        style: ConstellationStyle,
+        lines: list[ConstellationLine],
+        names: list[ConstellationName],
+    ):
+        super().__init__()
+        self.wcs = wcs
+        self.style = style
+        self.lines = lines
+        self.names = names
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setZValue(0)  # sky-background context -- behind the grid (1) and markers
+
+    def _geometry(self):
+        return compute_constellation_geometry(self.wcs, self.style, self.lines, self.names)
+
+    def boundingRect(self) -> QRectF:
+        # Unlike GridItem's plain frame rect, a kept line segment's far endpoint (see
+        # compute_constellation_geometry's docstring on why segments aren't clipped at
+        # the frame edge) can legitimately sit outside the image frame -- the bounding
+        # rect has to cover those too, or Qt may cull/clip the very stroke this item
+        # exists to draw.
+        width, height = float(self.wcs.native_width), float(self.wcs.native_height)
+        min_x, min_y, max_x, max_y = 0.0, 0.0, width, height
+        for (x0, y0), (x1, y1) in self._geometry().lines:
+            min_x, max_x = min(min_x, x0, x1), max(max_x, x0, x1)
+            min_y, max_y = min(min_y, y0, y1), max(max_y, y0, y1)
+        pad = self.style.line_width + self.style.label_font_size + 8.0
+        return QRectF(min_x - pad, min_y - pad, (max_x - min_x) + 2 * pad, (max_y - min_y) + 2 * pad)
+
+    def shape(self) -> QPainterPath:
+        return QPainterPath()
+
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
+        style = self.style
+        if not style.enabled:
+            return
+        geo = self._geometry()
+        color = QColor(style.color)
+        color.setAlphaF(style.opacity)
+        painter.setPen(QPen(color, style.line_width))
+        for (x0, y0), (x1, y1) in geo.lines:
+            painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
+
+        if geo.labels:
+            font = QFont(_LABEL_FONT_FAMILY)
+            font.setPointSizeF(max(1.0, style.label_font_size))
+            painter.setFont(font)
+            painter.setPen(color)
+            for label in geo.labels:
+                painter.drawText(QPointF(label.x, label.y), label.text)
 
 
 class CompassItem(QGraphicsObject):

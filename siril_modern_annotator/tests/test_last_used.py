@@ -18,6 +18,7 @@ from PyQt6.QtCore import QSettings
 
 from siril_modern_annotator.annotation.models import (
     CompassStyle,
+    ConstellationStyle,
     DecLabelPosition,
     GridStyle,
     InfoBoxCorner,
@@ -148,6 +149,7 @@ def _resolution_scaled_defaults() -> OverlaySettings:
         grid=GridStyle(label_font_size=27.0, line_width=3.0),
         compass=CompassStyle(label_font_size=27.0, line_width=3.0),
         info_box=InfoBoxStyle(font_size=27.0, padding=18.0, border_radius=11.0, margin=44.0, text="from this FITS header"),
+        constellations=ConstellationStyle(label_font_size=27.0, line_width=3.0),
     )
 
 
@@ -172,6 +174,7 @@ def test_overlay_settings_round_trip_restores_size_independent_fields(monkeypatc
             enabled=True, corner=InfoBoxCorner.TOP_RIGHT, background_color="#abcdef",
             background_opacity=0.77, text_color="#fedcba",
         ),
+        constellations=ConstellationStyle(enabled=True, color="#a1b2c3", opacity=0.33, show_labels=False),
     )
     last_used.save_last_used_overlay_settings(saved)
 
@@ -192,6 +195,10 @@ def test_overlay_settings_round_trip_restores_size_independent_fields(monkeypatc
     assert result.info_box.background_color == "#abcdef"
     assert result.info_box.background_opacity == 0.77
     assert result.info_box.text_color == "#fedcba"
+    assert result.constellations.enabled is True
+    assert result.constellations.color == "#a1b2c3"
+    assert result.constellations.opacity == 0.33
+    assert result.constellations.show_labels is False
 
 
 def test_overlay_settings_apply_never_touches_size_dependent_or_per_image_fields(monkeypatch, tmp_path):
@@ -205,6 +212,7 @@ def test_overlay_settings_apply_never_touches_size_dependent_or_per_image_fields
         grid=GridStyle(enabled=True, color="#111111"),
         compass=CompassStyle(enabled=True, color="#222222"),
         info_box=InfoBoxStyle(enabled=True, background_color="#333333"),
+        constellations=ConstellationStyle(enabled=True, color="#444444"),
     )
     last_used.save_last_used_overlay_settings(saved)
 
@@ -222,6 +230,8 @@ def test_overlay_settings_apply_never_touches_size_dependent_or_per_image_fields
     assert result.info_box.border_radius == 11.0
     assert result.info_box.margin == 44.0
     assert result.info_box.text == "from this FITS header"
+    assert result.constellations.line_width == 3.0
+    assert result.constellations.label_font_size == 27.0
     assert (result.compass.anchor_x, result.compass.anchor_y) == (123.0, 456.0)
     assert (result.info_box.anchor_x, result.info_box.anchor_y) == (78.0, 90.0)
 
