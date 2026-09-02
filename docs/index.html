@@ -457,6 +457,60 @@
     .feature-grid { grid-template-columns: repeat(2, 1fr); }
   }
 
+  /* ---------------------------------------------------------------- catalogs */
+
+  .catalog-groups { display: flex; flex-direction: column; gap: 34px; }
+  .catalog-group-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 12px;
+  }
+  .catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .catalog-card {
+    background: var(--bg-elevated);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: background 0.2s ease;
+  }
+  .catalog-card:hover { background: var(--bg-elevated-2); }
+  .catalog-name-row { display: flex; align-items: center; gap: 8px; }
+  .catalog-swatch { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .catalog-name { font-size: 15px; font-weight: 600; color: var(--text); }
+  .catalog-tag {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 1px 7px;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .catalog-card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.55; }
+  .catalog-legend { font-size: 13.5px; color: var(--text-faint); margin-top: 18px; }
+
+  @media (max-width: 860px) {
+    .catalog-grid { grid-template-columns: 1fr; }
+  }
+  @media (min-width: 861px) and (max-width: 1080px) {
+    .catalog-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
   /* ---------------------------------------------------------------- how it works */
 
   .howitworks { background: var(--bg-hero-1); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
@@ -632,6 +686,7 @@
   <div class="nav-inner">
     <nav class="nav-links">
       <a href="#features">Features</a>
+      <a href="#catalogs">Catalogs</a>
       <a href="#how-it-works">How it works</a>
       <a href="#screenshots">Screenshots</a>
       <a href="#get-started">Get started</a>
@@ -731,8 +786,8 @@
     </div>
     <div class="stat-card">
       <div class="stat-row">
-        <span class="stat-num">6</span>
-        <span class="stat-label">catalogs searched automatically &mdash; Messier, NGC, IC, Sharpless, LDN, and bright stars, each with its own color.</span>
+        <span class="stat-num">17</span>
+        <span class="stat-label">supported catalogs, each with its own color &mdash; from Messier and NGC to Wolf-Rayet stars and supernova remnants.</span>
       </div>
       <hr>
       <div class="stat-row">
@@ -762,7 +817,7 @@
           <span class="line-inline"></span>
         </div>
         <h3>Automatic detection</h3>
-        <p>Every Messier, NGC, IC, Sharpless, LDN, and bright star in frame, found automatically &mdash; VizieR online, Siril&rsquo;s own bundled catalogs offline.</p>
+        <p>Every catalog object in frame, found automatically across 17 supported catalogs &mdash; VizieR online, Siril&rsquo;s own bundled catalogs offline. <a href="#catalogs" style="color:var(--accent); text-decoration:underline; text-underline-offset:2px;">See the full list</a>.</p>
       </div>
       <div class="feature">
         <div class="feature-mark" style="color:var(--accent)">
@@ -805,6 +860,118 @@
         <p>JPEG, PNG, 8-bit or 16-bit TIFF, at the image&rsquo;s true native resolution &mdash; independent of whatever you&rsquo;re previewing on screen.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<section id="catalogs">
+  <div class="wrap">
+    <div class="section-head center">
+      <div class="eyebrow">What it finds</div>
+      <h2>17 catalogs, each with its own color.</h2>
+      <p>Seven fetch automatically the moment your image loads; the rest are one click away in the Catalogs menu &mdash; toggle whichever ones matter for your field.</p>
+    </div>
+    <div class="catalog-groups">
+
+      <div>
+        <div class="catalog-group-label">General catalogs</div>
+        <div class="catalog-grid">
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#F2C572"></span><span class="catalog-name">Messier (M)</span></div>
+            <p>The 110 bright deep-sky objects Charles Messier catalogued in the 1770s&ndash;80s &mdash; still the most-imaged list in astronomy.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#7FC8C4"></span><span class="catalog-name">NGC</span></div>
+            <p>New General Catalogue &mdash; roughly 7,800 galaxies, clusters, and nebulae, compiled by Dreyer in 1888.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#B79CED"></span><span class="catalog-name">IC</span></div>
+            <p>Index Catalogue &mdash; Dreyer&rsquo;s two supplements to the NGC, adding roughly 5,300 objects missed the first time.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="catalog-group-label">Nebulae, dark clouds &amp; remnants</div>
+        <div class="catalog-grid">
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#F2938C"></span><span class="catalog-name">Sharpless (Sh2)</span></div>
+            <p>313 H&alpha; emission nebulae from Stewart Sharpless&rsquo;s 1959 survey &mdash; most of what glows red in a narrowband image.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#8FA9D6"></span><span class="catalog-name">LDN</span></div>
+            <p>Lynds&rsquo; Catalogue of Dark Nebulae &mdash; over 1,800 dust clouds silhouetted against the Milky Way.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#9FC9A8"></span><span class="catalog-name">Barnard (B)</span><span class="catalog-tag">VizieR</span></div>
+            <p>E.E. Barnard&rsquo;s 1919 dark-nebula list &mdash; 349 objects of the same kind as LDN, from an earlier photographic survey.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#D9A066"></span><span class="catalog-name">LBN</span><span class="catalog-tag">VizieR</span></div>
+            <p>Lynds&rsquo; Catalogue of Bright Nebulae &mdash; over 1,100 diffuse nebulae, the bright counterpart to her own LDN list.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#D98C9E"></span><span class="catalog-name">RCW</span><span class="catalog-tag">VizieR</span></div>
+            <p>Rodgers, Campbell &amp; Whiteoak&rsquo;s 1960 survey of H&alpha; emission regions across the southern Milky Way.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#8EC6E0"></span><span class="catalog-name">vdB</span><span class="catalog-tag">VizieR</span></div>
+            <p>van den Bergh&rsquo;s catalogue of reflection nebulae, positioned by the star that lights each one.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#E8A87C"></span><span class="catalog-name">Gum</span></div>
+            <p>Colin Gum&rsquo;s 1955 survey of southern HII regions, including the Gum Nebula itself.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#DB8570"></span><span class="catalog-name">SNR</span><span class="catalog-tag">VizieR</span></div>
+            <p>Green&rsquo;s Catalogue of Galactic Supernova Remnants &mdash; the expanding wreckage of exploded stars.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#C9A0DC"></span><span class="catalog-name">Abell</span><span class="catalog-tag">VizieR</span></div>
+            <p>Abell&rsquo;s 1966 planetary-nebula catalogue &mdash; not to be confused with his far more famous galaxy-cluster catalogue of the same name.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="catalog-group-label">Galaxies</div>
+        <div class="catalog-grid">
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#B5B87A"></span><span class="catalog-name">Arp</span><span class="catalog-tag">VizieR</span></div>
+            <p>Arp&rsquo;s Atlas of Peculiar Galaxies &mdash; 338 galaxies picked out for looking distorted, interacting, or otherwise unusual.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#C2A98A"></span><span class="catalog-name">Hickson (HCG)</span><span class="catalog-tag">VizieR</span></div>
+            <p>Hickson&rsquo;s Compact Groups of Galaxies &mdash; tightly bound clusters like Stephan&rsquo;s Quintet.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="catalog-group-label">Stars</div>
+        <div class="catalog-grid">
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#F5E6A3"></span><span class="catalog-name">Star Catalogue</span></div>
+            <p>Bright naked-eye stars, merging Siril&rsquo;s own bundled list with the Yale Bright Star Catalogue.</p>
+          </div>
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#B8E0D8"></span><span class="catalog-name">WR</span><span class="catalog-tag">VizieR</span></div>
+            <p>The Galactic Wolf-Rayet stars &mdash; rare, massive stars shedding their outer layers, often the ionizing source at the heart of a nebula.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="catalog-group-label">Your own objects</div>
+        <div class="catalog-grid">
+          <div class="catalog-card">
+            <div class="catalog-name-row"><span class="catalog-swatch" style="background:#E3A8C4"></span><span class="catalog-name">Siril User Catalogue</span></div>
+            <p>Whatever you&rsquo;ve already searched and applied through Siril&rsquo;s own Astrometry &#9656; Annotate &#9656; Search Object dialog, shown here too.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <p class="catalog-legend">Everything above is found automatically within your image&rsquo;s field of view. A <span class="catalog-tag" style="margin-left:0;">VizieR</span> tag means that catalog is queried live and needs an internet connection &mdash; every other one also works fully offline, from Siril&rsquo;s own bundled data.</p>
   </div>
 </section>
 
@@ -945,6 +1112,15 @@
         </div>
         <h3>A marker or label</h3>
         <p>Hide it, delete it (custom objects only), or reset it back to its catalog position &mdash; only shown once you&rsquo;ve actually dragged it.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-mark" style="color:var(--mark-yellow)">
+          <span class="dot-inline" style="background:currentColor"></span>
+          <span class="tip-badge">Right-click</span>
+          <span class="line-inline"></span>
+        </div>
+        <h3>A marker, label, or Objects panel row</h3>
+        <p>Open in SIMBAD &mdash; jumps straight to that object&rsquo;s SIMBAD entry in your browser, matched by its own catalog identifier.</p>
       </div>
       <div class="feature">
         <div class="feature-mark" style="color:var(--mark-lavender)">
