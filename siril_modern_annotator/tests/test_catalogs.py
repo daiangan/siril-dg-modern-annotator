@@ -181,6 +181,7 @@ class _StubProvider(CatalogProvider):
         galaxy_major_axis_arcmin: float | None = None,
         galaxy_minor_axis_arcmin: float | None = None,
         galaxy_position_angle_screen_deg: float | None = None,
+        common_name: str | None = None,
     ):
         self._ann = Annotation(
             catalog=catalog, catalog_name=catalog_name, ra=ra, dec=dec,
@@ -190,6 +191,7 @@ class _StubProvider(CatalogProvider):
             galaxy_major_axis_arcmin=galaxy_major_axis_arcmin,
             galaxy_minor_axis_arcmin=galaxy_minor_axis_arcmin,
             galaxy_position_angle_screen_deg=galaxy_position_angle_screen_deg,
+            common_name=common_name,
         )
         self._catalog = catalog
 
@@ -738,6 +740,50 @@ def test_rcw_corrected_position_provider_covers_182_numeric_rcw_designations():
 
     assert len(CORRECTED_RCW_POSITIONS) == 182
     assert set(CORRECTED_RCW_POSITIONS) <= set(range(1, 183))  # RCW numbers run 1-182
+
+
+# ------------------------------------------ CompositeProvider._apply_common_names ----
+# Per explicit user request: popular names (e.g. "Crescent Nebula" for NGC6888) for
+# well-known objects across every catalog, not just Messier (which only ever had one
+# because Siril's own messier.csv bundles a name in its "alias" column) -- see
+# common_names.py's own docstring for the full source (Wikidata, CC0) and the real data
+# cleaning that went into building COMMON_NAMES.
+
+
+def test_apply_common_names_backfills_a_known_object():
+    provider = CompositeProvider([_StubProvider("ngc", "NGC6888", 303.02709, 38.355)])
+    results = provider.query(_wcs_at(303.02709, 38.355), {"ngc"})
+    ngc6888 = next(a for a in results if a.catalog_name == "NGC6888")
+    assert ngc6888.common_name == "Crescent Nebula"
+
+
+def test_apply_common_names_leaves_an_unknown_object_alone():
+    provider = CompositeProvider([_StubProvider("ngc", "NGC9999999", 10.0, 20.0)])
+    results = provider.query(_wcs_at(10.0, 20.0), {"ngc"})
+    assert results[0].common_name is None
+
+
+def test_apply_common_names_never_overwrites_a_name_a_provider_already_set():
+    """Non-clobbering, same precedent as every other cross-provider enrichment field --
+    a provider's own common_name (e.g. Siril's messier.csv alias column) always wins."""
+    provider = CompositeProvider(
+        [_StubProvider("ngc", "NGC6888", 303.02709, 38.355, common_name="The Local Nickname")]
+    )
+    results = provider.query(_wcs_at(303.02709, 38.355), {"ngc"})
+    assert results[0].common_name == "The Local Nickname"
+
+
+def test_common_names_covers_examples_across_every_included_catalog():
+    from siril_modern_annotator.annotation.common_names import COMMON_NAMES
+
+    assert COMMON_NAMES["NGC6888"] == "Crescent Nebula"
+    assert COMMON_NAMES["Sh2-101"] == "Tulip Nebula"
+    assert COMMON_NAMES["M42"] == "Orion Nebula"
+    assert COMMON_NAMES["IC1805"] == "Heart Nebula"
+    assert COMMON_NAMES["B33"] == "Horsehead Nebula"
+    assert COMMON_NAMES["RCW 53"] == "Carina Nebula"
+    assert COMMON_NAMES["Arp 317"] == "Leo Triplet"
+    assert COMMON_NAMES["HCG 92"] == "Stephan's Quintet"
 
 
 # ------------------------------------------------------------------- GumProvider ----

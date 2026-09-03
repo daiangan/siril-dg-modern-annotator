@@ -1560,7 +1560,21 @@ class CompositeProvider(CatalogProvider):
                 logger.exception("Catalog provider %s failed", provider)
         results = self._dedupe(merged)
         self._disable_out_of_frame(results, wcs)
+        self._apply_common_names(results)
         return results
+
+    def _apply_common_names(self, annotations: list[Annotation]) -> None:
+        """Backfills a popular name (e.g. "Crescent Nebula" for NGC6888) from
+        common_names.COMMON_NAMES whenever nothing upstream already set one -- see that
+        module's own docstring for the full source and data-cleaning methodology.
+        Non-clobbering, same precedent as every other cross-provider enrichment field
+        in _dedupe: a provider's own common_name (e.g. Siril's messier.csv "alias"
+        column) always wins over this lookup."""
+        from .common_names import COMMON_NAMES
+
+        for ann in annotations:
+            if ann.common_name is None:
+                ann.common_name = COMMON_NAMES.get(ann.catalog_name)
 
     def _disable_out_of_frame(self, annotations: list[Annotation], wcs: SirilWcs) -> None:
         """Individual providers query with a small FOV margin (catalogs.py's
