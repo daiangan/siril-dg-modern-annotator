@@ -32,15 +32,34 @@ confirmed correct; IC4816 "Nova Sagittarii 1898" and NGC1664 "4-H cluster" were 
 -- the former is SIMBAD's entry for a star (V1059 Sgr), not this feature's intended
 "named nebula/galaxy" sense, and the latter had no independent corroboration anywhere.
 
-Deliberately conservative in scope as a result: 107 entries, covering only Messier,
-NGC, IC, Sh2, Barnard, RCW, Arp, and Hickson -- not every catalog this app supports.
-LDN, LBN, vdB, Gum, SNR, Abell, and WR were investigated but Wikidata's P528/P972
-structured data for them either wasn't discoverable (most of these smaller/less
-mainstream catalogs' own "catalog" qualifier item couldn't be reliably identified) or,
-where it was, didn't survive the same cleaning process. A real, direct object shows no
-popular name at all far more often than not (only ~600 of Wikidata's ~14,000 NGC-tagged
-items even had a P528-linked label before this filtering ran) -- that's expected and
-correct, not a gap in this table.
+Deliberately conservative in scope as a result: covering only Messier, NGC, IC, Sh2,
+Barnard, RCW, Arp, and Hickson -- not every catalog this app supports. LDN, LBN, vdB,
+Gum, SNR, Abell, and WR were investigated but Wikidata's P528/P972 structured data for
+them either wasn't discoverable (most of these smaller/less mainstream catalogs' own
+"catalog" qualifier item couldn't be reliably identified) or, where it was, didn't
+survive the same cleaning process. A real, direct object shows no popular name at all
+far more often than not (only ~600 of Wikidata's ~14,000 NGC-tagged items even had a
+P528-linked label before this filtering ran) -- that's expected and correct, not a gap
+in this table.
+
+Per a real report: an object's popular name was showing up under one of its catalog
+designations (e.g. "NGC6888" -> "Crescent Nebula") but not under another designation
+for the very same object (e.g. "Sh2-105", which the same per-catalog P972-scoped
+query missed -- Wikidata isn't internally consistent about which "catalog" qualifier
+item a given cross-reference statement carries, and this one apparently used a
+different or missing one than the Sh2 query was scoped to). Fixed with a second pass:
+for every name already found, resolve its Wikidata item and pull *all* of that item's
+other P528 codes (regardless of qualifier), then check each against every supported
+catalog's own designation shape to discover siblings the first pass missed. That pass
+found exactly two candidates -- both were independently checked against SIMBAD before
+deciding, same bar as the two ambiguous first-pass survivors: NGC2264 (also Sh2-273)
+is confirmed the same physical object as "Fox Fur Nebula" (SIMBAD groups them under
+one OID); "Sh2-105" for Crescent Nebula was *not* added despite coming from the
+Crescent Nebula's own Wikidata item -- SIMBAD lists 46 identifiers for NGC6888 and
+"Sh2-105" isn't among them, and Sh2-105's own SIMBAD entry is a separate, independent
+object at a measurably different position. A real cross-reference on one authoritative
+source doesn't always hold up against another; this table only accepts what SIMBAD
+independently corroborates when there's any doubt.
 
 Keyed by the exact catalog_name string each provider already produces (e.g. "NGC6888",
 "Sh2-101", "RCW 146", "M1", "B33", "Arp 317", "HCG 92", "IC1805") -- no further
@@ -100,6 +119,7 @@ COMMON_NAMES: dict[str, str] = {
     "NGC1976": "Orion Nebula",
     "NGC2024": "Flame Nebula",
     "NGC224": "Andromeda Galaxy",
+    "NGC2264": "Fox Fur Nebula",
     "NGC2419": "Intergalactic Wanderer",
     "NGC253": "Sculptor Galaxy",
     "NGC2632": "Beehive Cluster",

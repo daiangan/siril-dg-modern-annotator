@@ -786,6 +786,24 @@ def test_common_names_covers_examples_across_every_included_catalog():
     assert COMMON_NAMES["HCG 92"] == "Stephan's Quintet"
 
 
+def test_common_names_finds_cross_catalog_siblings_of_a_known_object():
+    """Regression test for a real report: the same physical object's popular name
+    showed up under one of its catalog designations but not another (NGC6888 had
+    "Crescent Nebula", but its Sh2 cross-reference Sh2-105 didn't) -- see
+    common_names.py's own docstring for the sibling-discovery pass this covers, and
+    for the object it deliberately did NOT add a cross-reference for after that pass's
+    candidate failed live verification against SIMBAD."""
+    from siril_modern_annotator.annotation.common_names import COMMON_NAMES
+
+    # NGC2264 and Sh2-273 are confirmed (via SIMBAD) the same physical object.
+    assert COMMON_NAMES["NGC2264"] == "Fox Fur Nebula"
+    assert COMMON_NAMES["Sh2-273"] == "Fox Fur Nebula"
+    # Sh2-105 was a candidate sibling of NGC6888/Crescent Nebula from Wikidata's own
+    # data, but SIMBAD does not corroborate it (Sh2-105 is a distinct object in
+    # SIMBAD, not among NGC6888's 46 listed identifiers) -- deliberately excluded.
+    assert "Sh2-105" not in COMMON_NAMES
+
+
 # ------------------------------------------------------------------- GumProvider ----
 # Per GitHub issue #10, same source as Sh2CorrectedPositionProvider above -- Gum
 # (1955, southern HII regions) via Kevin Jardine's Integrated HII Regions catalog.
