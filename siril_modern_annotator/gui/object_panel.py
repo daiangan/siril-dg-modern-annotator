@@ -297,7 +297,7 @@ class ObjectPanel(QWidget):
         self.catalog_filter.addItem("All catalogs", None)
         for c in catalogs:
             # Every other catalog shows its raw key here (e.g. "messier", not
-            # SUPPORTED_CATALOGS' full "Messier Catalogue (M)" label -- too long for
+            # SUPPORTED_CATALOGS' full "M - Messier Catalogue" label -- too long for
             # this compact dropdown). "user" gets the one exception: "user" on its own
             # reads as a bug, not a category, to someone who didn't write this code.
             self.catalog_filter.addItem("Custom" if c == "user" else c, c)

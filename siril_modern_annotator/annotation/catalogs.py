@@ -70,54 +70,54 @@ USER_CATALOG_FILES: dict[str, str] = {
 # we have no provider implementing those yet (ARCHITECTURE.md's future-feature list), and
 # a checkbox that does nothing would be misleading.
 SUPPORTED_CATALOGS: dict[str, str] = {
-    "messier": "Messier Catalogue (M)",
-    "ngc": "New General Catalogue (NGC)",
-    "ic": "Index Catalogue (IC)",
-    "ldn": "Lynds Catalogue of Dark Nebulae (LDN)",
-    "sh2": "Sharpless Catalogue (Sh2)",
+    "messier": "M - Messier Catalogue",
+    "ngc": "NGC - New General Catalogue",
+    "ic": "IC - Index Catalogue",
+    "ldn": "LDN - Lynds Catalogue of Dark Nebulae",
+    "sh2": "Sh2 - Sharpless Catalogue",
     "bright_star": "Star Catalogue",
     # Unlike every catalog above, this one has no bundled Siril CSV (see
     # _LOCAL_CATALOG_FILES) -- VII/220A is VizieR-only, so it's also in
     # ONLINE_ONLY_CATALOGS below, which keeps it off by default and drives the
     # "needs an internet connection" status message in main_window.py.
-    "barnard": "Barnard Catalogue of Dark Nebulae (B)",
+    "barnard": "B - Barnard Catalogue of Dark Nebulae",
     # Also VizieR-only (VII/9, no bundled Siril CSV) -- same reasoning as barnard above.
-    "lbn": "Lynds Catalogue of Bright Nebulae (LBN)",
+    "lbn": "LBN - Lynds Catalogue of Bright Nebulae",
     # Also VizieR-only (VII/216) -- the southern-hemisphere counterpart to Sharpless
     # (Sh2 is mostly northern-sky), so this fills a real gap for objects like Carina/
     # Vela that have no Sh2 designation at all.
-    "rcw": "Rodgers, Campbell & Whiteoak Catalogue (RCW)",
+    "rcw": "RCW - Rodgers, Campbell & Whiteoak Catalogue",
     # Also VizieR-only (VII/21). Unlike every other catalog here, each row is
     # positioned at the *illuminating star*, not a nebula centroid -- see
     # _vii21_row_to_annotation's own docstring.
-    "vdb": "van den Bergh Catalogue of Reflection Nebulae (vdB)",
+    "vdb": "vdB - van den Bergh Catalogue of Reflection Nebulae",
     # Not VizieR-only like the others above -- GumProvider reads bundled Python data
     # (gum_positions.py), fully offline, same as messier/ngc/etc.'s local CSVs. See
     # that module's docstring: not on VizieR at all, so this is a static snapshot of
     # Kevin Jardine's Integrated HII Regions catalog (galaxymap.org), per issue #10.
-    "gum": "Gum Catalogue of HII Regions (Gum)",
+    "gum": "Gum - Gum Catalogue of HII Regions",
     # Also VizieR-only (VII/192). Every row carries a real NGC/UGC/MCG cross-reference
     # used as simbad_id -- confirmed live that bare "Arp <n>" is unreliable on SIMBAD
     # for at least some numbers (a genuine collision with a different Arp catalog).
-    "arp": "Arp's Atlas of Peculiar Galaxies (Arp)",
+    "arp": "Arp - Arp's Atlas of Peculiar Galaxies",
     # Also VizieR-only (VII/213). Deliberately excluded from _DEEP_SKY_CATALOGS' cross-
     # catalog dedup -- see _vii213_row_to_annotation's own docstring/vdB's precedent:
     # a compact group and one of its member galaxies are conceptually different
     # objects even when positionally close.
-    "hickson": "Hickson Compact Groups of Galaxies (HCG)",
+    "hickson": "HCG - Hickson Compact Groups of Galaxies",
     # Also VizieR-only (VII/272).
-    "snr": "Green's Catalogue of Galactic Supernova Remnants (SNR)",
+    "snr": "SNR - Green's Catalogue of Galactic Supernova Remnants",
     # Also VizieR-only (V/163, HASH), filtered to just its Abell-numbered rows -- no
     # standalone Abell planetary nebula catalog was found on VizieR (unlike every
     # other catalog here). Confirmed live that bare "Abell <n>" is unreliable on
     # SIMBAD (collides with Abell's own, much larger galaxy-cluster catalog) --
     # simbad_id uses the real historical identifier ("PN A66 <n>") instead.
-    "abell": "Abell Catalogue of Planetary Nebulae (Abell)",
+    "abell": "Abell - Abell Catalogue of Planetary Nebulae",
     # Also VizieR-only (III/215). Unlike every catalog above, these are point-source
     # stars, not extended objects -- same category as bright_star (V/50), not the
     # deep-sky catalogs, so deliberately excluded from _DEEP_SKY_CATALOGS below (see
     # _iii215_row_to_annotation's own docstring).
-    "wr": "Catalogue of Galactic Wolf-Rayet Stars (WR)",
+    "wr": "WR - Catalogue of Galactic Wolf-Rayet Stars",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
     # USER_CATALOG_FILES above) -- not "user", which is this app's own unrelated
     # manually-placed custom objects.
