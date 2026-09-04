@@ -611,9 +611,9 @@ class StylePanel(QWidget):
         constellations_form.addRow(self.constellations_show_labels)
         constellations_form.addRow("Label size", self.constellations_label_size)
 
+        overlays_layout.addWidget(info_box_group)
         overlays_layout.addWidget(grid_group)
         overlays_layout.addWidget(compass_group)
-        overlays_layout.addWidget(info_box_group)
         overlays_layout.addWidget(constellations_group)
         overlays_layout.addStretch(1)
 
