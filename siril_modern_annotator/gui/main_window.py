@@ -69,6 +69,7 @@ from ..annotation.renderer import (
     compute_marker_geometry,
     default_max_marker_radius_px,
 )
+from ..annotation.star_identify import StarCandidate, default_radius_arcsec
 from ..annotation.wcs import NotPlateSolvedError, SirilWcs
 from ..persistence import last_used as last_used_store
 from ..persistence import presets as preset_store
@@ -93,7 +94,7 @@ from .image_view import ImageView
 from .object_panel import ObjectPanel, simbad_url_for
 from .style_panel import StylePanel
 from .tools_panel import ToolsPanel
-from .workers import CatalogFetchWorker, ExportWorker
+from .workers import CatalogFetchWorker, ExportWorker, StarIdentifyWorker
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +234,7 @@ class MainWindow(QMainWindow):
         self._pending_object_target: str | None = None
 
         self._catalog_worker: CatalogFetchWorker | None = None
+        self._star_identify_worker: StarIdentifyWorker | None = None
         self._export_worker: ExportWorker | None = None
         self._progress_dialog: QProgressDialog | None = None
 
@@ -1250,10 +1252,14 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         add_action = menu.addAction("Add Custom Object")
+        identify_action = menu.addAction("Identify Star")
         # Acting on exec()'s return value, not add_action.triggered -- see
         # _show_object_context_menu's comment for the full reasoning (same fix).
-        if menu.exec(screen_pos) is add_action:
+        chosen = menu.exec(screen_pos)
+        if chosen is add_action:
             self._add_custom_object(x, y)
+        elif chosen is identify_action:
+            self._identify_star_at(x, y, screen_pos)
 
     def _add_custom_object(self, x: float, y: float) -> None:
         # ra/dec (not just image_x/image_y) are needed even for a manually-placed
@@ -1302,6 +1308,92 @@ class MainWindow(QMainWindow):
         self.style_panel.show_object_tab()
         self.style_panel.custom_name_edit.setFocus()
         self.style_panel.custom_name_edit.selectAll()
+
+    def _identify_star_at(self, x: float, y: float, screen_pos) -> None:
+        """Right-click "Identify Star" -- per explicit user request, so a star Siril's
+        own annotator (and this app's bright_star catalog) is too faint to know about
+        can still be identified and labeled, not just placed blank like Add Custom
+        Object. Looks up the nearest star-type SIMBAD object(s) to the click via a
+        background StarIdentifyWorker; see star_identify.py's own docstring for the
+        query/filtering itself."""
+        if self.wcs is None or self.image_info is None or self.arcsec_per_px is None:
+            return
+        # Ignore a second click while one lookup is already in flight, rather than
+        # starting an overlapping query -- same "keep a reference so it isn't garbage-
+        # collected mid-flight" discipline as every other worker in this file (see
+        # _fetch_additional_catalog's own comment) also guards against firing two of
+        # these at once from a rapid double right-click.
+        if self._star_identify_worker is not None and self._star_identify_worker.isRunning():
+            return
+        ra, dec = self.wcs.pixel_to_world(x, y)
+        radius_arcsec = default_radius_arcsec(self.arcsec_per_px)
+        worker = StarIdentifyWorker(ra, dec, radius_arcsec)
+        worker.progress.connect(lambda msg: self.connection_label.setText(msg))
+        worker.succeeded.connect(lambda candidates, pos=screen_pos: self._on_star_identify_results(candidates, pos))
+        worker.failed.connect(self._on_star_identify_failed)
+        self._star_identify_worker = worker
+        worker.start()
+
+    def _on_star_identify_results(self, candidates: list[StarCandidate], screen_pos) -> None:
+        if not candidates:
+            self.connection_label.setText("No star found near that position.")
+            return
+        if len(candidates) == 1:
+            self._create_star_annotation(candidates[0])
+            return
+        # 2-3 candidates: let the user pick one, same "build the menu, act on exec()'s
+        # return value, never .triggered" pattern as every other menu in this file (see
+        # _show_object_context_menu's own comment on the real crash that pattern
+        # avoids) -- just with a runtime-sized list of actions instead of a fixed set.
+        menu = QMenu(self)
+        action_for_candidate: dict[object, StarCandidate] = {}
+        for candidate in candidates:
+            if candidate.magnitude is not None:
+                label = f'{candidate.simbad_id}  (V={candidate.magnitude:.1f}, {candidate.separation_arcsec:.1f}")'
+            else:
+                label = f'{candidate.simbad_id}  ({candidate.separation_arcsec:.1f}" away)'
+            action_for_candidate[menu.addAction(label)] = candidate
+        chosen = menu.exec(screen_pos)
+        if chosen is None:
+            return
+        self._create_star_annotation(action_for_candidate[chosen])
+
+    def _on_star_identify_failed(self, message: str) -> None:
+        logger.error("Star identification failed: %s", message)
+        self.connection_label.setText(f"Star lookup failed (check your internet connection): {message}")
+
+    def _create_star_annotation(self, candidate: StarCandidate) -> None:
+        # candidate.ra/dec (resolved by SIMBAD) is authoritative here, not the original
+        # click position -- the click was only the search center, same "ra/dec is the
+        # permanent source of truth" contract every other catalog object already
+        # follows (ARCHITECTURE.md #4). Unlike _add_custom_object (where the click
+        # itself has no other position to snap to), getting this backwards would leave
+        # the marker sitting at the click instead of the star's real position.
+        image_x, image_y = self.wcs.world_to_pixel(candidate.ra, candidate.dec)
+        ann = Annotation(
+            catalog="user",
+            catalog_name=candidate.simbad_id,
+            ra=candidate.ra,
+            dec=candidate.dec,
+            image_x=float(image_x),
+            image_y=float(image_y),
+            object_type=candidate.otype or "star",
+            magnitude=candidate.magnitude,
+            simbad_id=candidate.simbad_id,
+            priority=default_priority_for_catalog("user"),
+            # marker_style left at its default (None): unlike Add Custom Object's own
+            # 1.6x radius bump -- which exists specifically to make a *blank* object
+            # stand out (see _add_custom_object's own comment) -- an identified star
+            # already carries a real designation, same as any other catalog star.
+        )
+        cmd = AddAnnotationCommand(
+            ann, self.annotations, self._add_scene_items_for, self._remove_scene_items_for,
+            self._refresh_after_annotation_count_change,
+        )
+        self.undo_stack.push(cmd)
+        # Unlike _add_custom_object's tail, no need to force focus into the rename
+        # field -- the name is already meaningful, nothing needs typing.
+        self.select_annotation(ann.id)
 
     def _delete_annotation(self, annotation_id: str) -> None:
         # Offered only for catalog == "user" objects -- see DeleteAnnotationCommand's
@@ -1476,9 +1568,12 @@ class MainWindow(QMainWindow):
         delete_action = menu.addAction(f"Delete {name}") if ann.catalog == "user" else None
         # Per user request: same "Open in SIMBAD" action as the Objects panel's own
         # right-click menu (object_panel.py), reusing its exact URL-building logic
-        # rather than a second, drifting copy. Same catalog == "user" exclusion --  a
-        # custom object has no real catalog identifier for SIMBAD to resolve.
-        simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
+        # rather than a second, drifting copy. catalog == "user" is excluded UNLESS
+        # simbad_id is set -- a plain custom object has no real catalog identifier for
+        # SIMBAD to resolve, but an "Identify Star"-created one does (see
+        # _create_star_annotation), and simbad_url_for already prefers simbad_id over
+        # catalog_name when present.
+        simbad_action = menu.addAction("Open in SIMBAD") if (ann.catalog != "user" or ann.simbad_id) else None
         # Acting on menu.exec()'s *return value* here, after it returns, rather than
         # on each action's triggered signal (which fires *during* exec()'s own still-
         # active nested event loop) -- real crash report (a full macOS crash log, not
