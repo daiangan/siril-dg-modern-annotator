@@ -18,6 +18,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..annotation.catalogs import CatalogProvider
 from ..annotation.constellations import ConstellationLine, ConstellationName
 from ..annotation.models import Annotation, OverlaySettings, StylePreset
+from ..annotation.star_identify import identify_stars
 from ..annotation.wcs import SirilWcs
 from ..persistence.project import ExportSettings
 
@@ -46,6 +47,31 @@ class CatalogFetchWorker(QThread):
             self.progress.emit("Querying catalogs...")
             results = self._provider.query(self._wcs, self._catalogs, self._mag_limit)
             self.progress.emit(f"Found {len(results)} objects in field.")
+            self.succeeded.emit(results)
+        except Exception as exc:  # noqa: BLE001 - surface any failure to the GUI, never crash silently
+            self.failed.emit(str(exc))
+
+
+class StarIdentifyWorker(QThread):
+    """Right-click "Identify Star" (main_window.py's _identify_star_at) -- a SIMBAD
+    coordinate lookup for a single point, same 3-signal shape as CatalogFetchWorker
+    above but answering "closest star-type object(s) to this point" rather than
+    "everything in this field for these catalogs"."""
+
+    progress = pyqtSignal(str)
+    succeeded = pyqtSignal(list)  # list[StarCandidate]
+    failed = pyqtSignal(str)
+
+    def __init__(self, ra: float, dec: float, radius_arcsec: float, parent=None):
+        super().__init__(parent)
+        self._ra = ra
+        self._dec = dec
+        self._radius_arcsec = radius_arcsec
+
+    def run(self) -> None:
+        try:
+            self.progress.emit("Querying SIMBAD...")
+            results = identify_stars(self._ra, self._dec, self._radius_arcsec)
             self.succeeded.emit(results)
         except Exception as exc:  # noqa: BLE001 - surface any failure to the GUI, never crash silently
             self.failed.emit(str(exc))

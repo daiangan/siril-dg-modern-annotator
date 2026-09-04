@@ -366,7 +366,10 @@ class ObjectPanel(QWidget):
         # Per user request: not offered for custom (manually-placed) objects -- a
         # comet, a satellite trail, a typo'd name has no real catalog identifier for
         # SIMBAD to resolve, unlike every real catalog object's own catalog_name.
-        simbad_action = menu.addAction("Open in SIMBAD") if ann.catalog != "user" else None
+        # Exception: an "Identify Star" object (main_window.py's _create_star_
+        # annotation) is also catalog == "user" but has a real simbad_id set --
+        # simbad_url_for already prefers that over catalog_name when present.
+        simbad_action = menu.addAction("Open in SIMBAD") if (ann.catalog != "user" or ann.simbad_id) else None
         chosen = menu.exec(self.table.viewport().mapToGlobal(pos))
         if chosen is simbad_action and simbad_action is not None:
             QDesktopServices.openUrl(QUrl(simbad_url_for(ann.catalog, ann.catalog_name, ann.simbad_id)))
