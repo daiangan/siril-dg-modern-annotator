@@ -19,10 +19,32 @@ This script instead generates a replacement source for that one module with the 
 theme_dark.qss contents embedded as a string literal, so the bundle needs nothing on
 disk at runtime and there is no separate copy to keep in sync — it's re-embedded fresh
 on every build.
+
+Two things about the *readability* of the generated file, both added after a real
+Siril scripts maintainer rejected an MR submission of this bundle as unreviewable:
+
+1. Module sources used to be embedded via plain repr() of the whole {name: source}
+   dict -- repr() escapes every real newline in a string as a literal backslash-n
+   rather than an actual line break, so every module's entire source collapsed onto
+   one physical line (one case measured at 269,410 characters) instead of reading as
+   normal multi-line Python. _render_module_sources below embeds each module as a
+   triple-quoted string with real newlines preserved instead, so the generated file
+   scrolls and reads like ordinary source -- see that function's own docstring for the
+   one edge case it still falls back to repr() for.
+2. This codebase's own dev-tree docstrings are deliberately verbose -- they record the
+   real bug reports, user requests, and live-verification steps behind non-obvious
+   decisions, which has repeatedly prevented regressions during development. A reviewer
+   seeing that for the first time, with no access to that history, correctly read it as
+   noise. _condense_docstrings below keeps every *dev-tree* docstring exactly as
+   written (nothing here ever touches siril_modern_annotator/ itself) but, for the
+   bundle output only, keeps just each docstring's first paragraph -- this codebase's
+   docstrings consistently front-load the essential point there, with later paragraphs
+   being supporting detail/history a reviewer doesn't need.
 """
 
 from __future__ import annotations
 
+import ast
 import base64
 import re
 import shutil
@@ -47,9 +69,11 @@ _RESOURCES_INIT_TEMPLATE = '''"""Bundled resources (single-file build: embedded,
 import base64
 
 def load_dark_stylesheet() -> str:
-    return {stylesheet!r}
+    return r"""{stylesheet}"""
 
 def load_app_icon_png_bytes() -> bytes:
+    # Binary data as base64 text has no natural line structure to preserve -- unlike
+    # the stylesheet above, repr() here isn't a readability regression.
     return base64.b64decode({icon_b64!r})
 '''
 
@@ -73,7 +97,7 @@ import sys
 import importlib.abc
 import importlib.util
 
-_MODULE_SOURCES = {modules!r}
+_MODULE_SOURCES = {modules}
 _PACKAGE_NAMES = {packages!r}
 
 
@@ -102,6 +126,112 @@ if __name__ == "__main__":
 '''
 
 
+_TRIPLE_QUOTE_RE = re.compile(r'^([a-zA-Z]{0,2})("""|\'\'\')', re.DOTALL)
+
+
+def _condense_docstring_span(span: str) -> str:
+    """Given the exact original source text of one docstring (quote characters
+    included, e.g. '\"\"\"First paragraph...\\n\\nSecond paragraph...\\n\"\"\"'),
+    returns just its first paragraph, still properly quoted -- or the span unchanged
+    if it's a single-quoted one-liner (already as short as it gets) or already just
+    one paragraph."""
+    match = _TRIPLE_QUOTE_RE.match(span)
+    if not match:
+        return span
+    prefix, quote = match.group(1), match.group(2)
+    body = span[len(prefix) + 3 : -3]
+    if "\n\n" not in body:
+        return span
+    first_paragraph = body.split("\n\n", 1)[0].rstrip()
+    return f"{prefix}{quote}{first_paragraph}{quote}"
+
+
+def _docstring_nodes(node: ast.AST) -> list[ast.Constant]:
+    result: list[ast.Constant] = []
+    if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        if (
+            node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        ):
+            result.append(node.body[0].value)
+    for child in ast.iter_child_nodes(node):
+        result.extend(_docstring_nodes(child))
+    return result
+
+
+def _condense_docstrings(source: str) -> str:
+    """Condenses every module/class/function docstring in source down to just its
+    first paragraph -- see this file's own module docstring for why. Locates each
+    docstring by its exact line/column span (available on the ast.Constant node since
+    Python 3.8) and replaces only that span's text, so every other line -- including
+    every inline # comment, which this deliberately leaves untouched -- keeps its
+    original formatting exactly. Processes spans in reverse source order so replacing
+    one never shifts the position of another not yet processed."""
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    doc_nodes = sorted(_docstring_nodes(tree), key=lambda n: (n.lineno, n.col_offset), reverse=True)
+
+    for doc_node in doc_nodes:
+        start_line, start_col = doc_node.lineno, doc_node.col_offset
+        end_line, end_col = doc_node.end_lineno, doc_node.end_col_offset
+        if start_line == end_line:
+            original_span = lines[start_line - 1][start_col:end_col]
+        else:
+            span_lines = [lines[start_line - 1][start_col:]]
+            span_lines.extend(lines[start_line : end_line - 1])
+            span_lines.append(lines[end_line - 1][:end_col])
+            original_span = "".join(span_lines)
+
+        condensed_span = _condense_docstring_span(original_span)
+        if condensed_span == original_span:
+            continue
+
+        if start_line == end_line:
+            lines[start_line - 1] = (
+                lines[start_line - 1][:start_col] + condensed_span + lines[start_line - 1][end_col:]
+            )
+        else:
+            tail = lines[end_line - 1][end_col:]
+            new_first = lines[start_line - 1][:start_col] + condensed_span + tail
+            lines[start_line - 1 : end_line] = [new_first]
+
+    return "".join(lines)
+
+
+def _render_module_sources(modules: dict[str, str]) -> str:
+    """Renders the _MODULE_SOURCES dict as real Python source, embedding each module's
+    text as a *raw* triple-quoted string (r'''...''') with real newlines preserved --
+    see this file's own module docstring for the real maintainer rejection this
+    replaces (plain repr(), which escapes every newline instead of embedding one, and
+    collapsed every module onto one physical line as a result).
+
+    Deliberately raw, not a plain '''...''': a non-raw triple-quoted string still
+    processes backslash escapes in its body, so embedding a module's source verbatim
+    inside one would silently reinterpret any \\n, \\t, \\\\, etc. *already present as
+    literal text* in that source (e.g. inside a regex pattern) -- undefined escapes
+    like \\s/\\d only warn and happen to survive intact, but \\n and friends would
+    silently corrupt the embedded module. Confirmed by a real SyntaxWarning on the
+    first version of this function that used a plain (non-raw) wrapper.
+
+    Triple-*single*-quotes are used as the delimiter since this codebase's own
+    convention is triple-*double*-quotes for every real docstring, so a literal '''
+    collision is not expected in practice -- checked per module regardless, falling
+    back to repr() (still correct, just not as readable) for the rare module where
+    that assumption doesn't hold, or whose source ends in a character a raw string
+    can't safely precede its closing quote with, rather than risk a malformed or
+    silently-corrupted embedding."""
+    lines = ["{"]
+    for name, source in modules.items():
+        if "'''" in source or source.endswith("'") or source.endswith("\\"):
+            lines.append(f"    {name!r}: {source!r},")
+        else:
+            lines.append(f"    {name!r}: r'''{source}''',")
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def _module_name_and_kind(path: Path) -> tuple[str, bool]:
     rel = path.relative_to(PACKAGE_ROOT.parent)
     parts = list(rel.with_suffix("").parts)
@@ -116,6 +246,14 @@ def collect_modules() -> tuple[dict[str, str], list[str]]:
     packages: list[str] = []
     stylesheet_path = PACKAGE_ROOT / "resources" / "theme_dark.qss"
     stylesheet_text = stylesheet_path.read_text(encoding="utf-8")
+    # _RESOURCES_INIT_TEMPLATE embeds this raw inside a r"""...""" literal (see its own
+    # comment) -- fail loudly at build time if a future edit to the stylesheet ever
+    # introduces a literal \"\"\" sequence, rather than silently emit a broken bundle.
+    if '"""' in stylesheet_text:
+        raise RuntimeError(
+            f"{stylesheet_path} contains a literal \"\"\" sequence, which would break "
+            "_RESOURCES_INIT_TEMPLATE's raw triple-quote embedding."
+        )
     icon_path = PACKAGE_ROOT / "resources" / "icon.png"
     icon_b64 = base64.b64encode(icon_path.read_bytes()).decode("ascii")
 
@@ -149,8 +287,13 @@ def _extract_version(modules: dict[str, str]) -> str:
 def build() -> Path:
     modules, packages = collect_modules()
     version = _extract_version(modules)
+    # Condensed for the bundle output only -- collect_modules() always reads the real
+    # dev-tree files verbatim, and nothing here writes back to siril_modern_annotator/
+    # itself. See this file's own module docstring for why this exists.
+    condensed_modules = {name: _condense_docstrings(source) for name, source in modules.items()}
+    rendered_modules = _render_module_sources(condensed_modules)
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    content = _HEADER_TEMPLATE.format(modules=modules, packages=packages, version=version)
+    content = _HEADER_TEMPLATE.format(modules=rendered_modules, packages=packages, version=version)
     OUTPUT_PATH.write_text(content, encoding="utf-8")
     return OUTPUT_PATH
 

@@ -6,4 +6,4 @@ requires-python = ">=3.9"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["siril_modern_annotator/tests"]
+testpaths = ["siril_modern_annotator/tests", "build"]
