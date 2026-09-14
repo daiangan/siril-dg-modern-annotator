@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bundle import (  # noqa: E402
     _condense_docstring_span,
     _condense_docstrings,
+    _format_b64_chunks,
     _render_module_sources,
 )
 
@@ -170,3 +171,21 @@ def test_render_module_sources_preserves_backslash_escapes_byte_for_byte():
     match = pattern.search("!!! theta1 Ori and the great neb; = M42")
     assert match is not None
     assert match.group(1) == "42"
+
+
+def test_format_b64_chunks_bounds_line_length_and_decodes_cleanly():
+    import base64
+
+    raw_bytes = b"astronomical annotation data " * 50
+    b64_text = base64.b64encode(raw_bytes).decode("ascii")
+    chunks = _format_b64_chunks(b64_text, chunk_size=76, indent="    ")
+
+    lines = chunks.splitlines()
+    assert len(lines) > 1
+    for line in lines:
+        assert len(line) <= 85  # 4-space indent + 2 quotes + 76 chars
+
+    ns: dict = {}
+    code = f"import base64\ndata = base64.b64decode(\n{chunks}\n)"
+    exec(compile(code, "<b64_test>", "exec"), ns)
+    assert ns["data"] == raw_bytes

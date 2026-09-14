@@ -27,7 +27,15 @@ from __future__ import annotations
 import csv
 import logging
 import re
+import warnings
 from abc import ABC, abstractmethod
+
+# Suppress benign Astropy Angle.to_string / NumPy vectorize RuntimeWarning
+warnings.filterwarnings(
+    "ignore",
+    message=r".*do_format \(vectorized\).*",
+    category=RuntimeWarning,
+)
 from dataclasses import dataclass
 from pathlib import Path
 

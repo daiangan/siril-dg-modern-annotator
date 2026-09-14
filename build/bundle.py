@@ -72,9 +72,9 @@ def load_dark_stylesheet() -> str:
     return r"""{stylesheet}"""
 
 def load_app_icon_png_bytes() -> bytes:
-    # Binary data as base64 text has no natural line structure to preserve -- unlike
-    # the stylesheet above, repr() here isn't a readability regression.
-    return base64.b64decode({icon_b64!r})
+    return base64.b64decode(
+{icon_b64_chunks}
+    )
 '''
 
 _HEADER_TEMPLATE = '''#!/usr/bin/env python3
@@ -241,6 +241,14 @@ def _module_name_and_kind(path: Path) -> tuple[str, bool]:
     return ".".join(parts), is_package
 
 
+def _format_b64_chunks(b64_str: str, chunk_size: int = 76, indent: str = "        ") -> str:
+    """Formats a base64 string into concatenated string literals on separate lines.
+    This avoids creating single hundred-thousand-character physical lines that hang text
+    editors like Siril's built-in script editor or Kate."""
+    lines = [f'{indent}"{b64_str[i:i + chunk_size]}"' for i in range(0, len(b64_str), chunk_size)]
+    return "\n".join(lines)
+
+
 def collect_modules() -> tuple[dict[str, str], list[str]]:
     modules: dict[str, str] = {}
     packages: list[str] = []
@@ -256,6 +264,7 @@ def collect_modules() -> tuple[dict[str, str], list[str]]:
         )
     icon_path = PACKAGE_ROOT / "resources" / "icon.png"
     icon_b64 = base64.b64encode(icon_path.read_bytes()).decode("ascii")
+    icon_b64_chunks = _format_b64_chunks(icon_b64)
 
     for path in sorted(PACKAGE_ROOT.rglob("*.py")):
         rel_parts = path.relative_to(PACKAGE_ROOT).parts
@@ -263,7 +272,9 @@ def collect_modules() -> tuple[dict[str, str], list[str]]:
             continue
         name, is_package = _module_name_and_kind(path)
         if name == "siril_modern_annotator.resources":
-            source = _RESOURCES_INIT_TEMPLATE.format(stylesheet=stylesheet_text, icon_b64=icon_b64)
+            source = _RESOURCES_INIT_TEMPLATE.format(
+                stylesheet=stylesheet_text, icon_b64_chunks=icon_b64_chunks
+            )
         else:
             source = path.read_text(encoding="utf-8")
         modules[name] = source

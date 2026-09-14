@@ -106,6 +106,17 @@ class SirilBridge:
     def connected(self) -> bool:
         return self._siril is not None
 
+    def disconnect(self) -> None:
+        """Closes the socket/pipe connection to Siril if open."""
+        if self._siril is not None:
+            try:
+                if getattr(self._siril, "connected", False):
+                    self._siril.disconnect()
+            except Exception:
+                logger.debug("Failed to disconnect from Siril cleanly", exc_info=True)
+            finally:
+                self._siril = None
+
     def _require_connection(self):
         if self._siril is None:
             raise SirilBridgeError("Not connected to Siril. Call connect() first.")

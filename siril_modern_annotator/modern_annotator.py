@@ -12,7 +12,17 @@ module load time).
 from __future__ import annotations
 
 import logging
+import os
+import platform
 import sys
+import warnings
+
+# Suppress benign Astropy Angle.to_string / NumPy vectorize RuntimeWarning (false positive on scalar angles)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*do_format \(vectorized\).*",
+    category=RuntimeWarning,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("siril_modern_annotator")
@@ -61,6 +71,11 @@ def main() -> int:
         # over something as minor as a sirilpy logging API mismatch.
         logger.debug("Could not write the startup banner to Siril's log.", exc_info=True)
 
+    if platform.system().lower() == "linux":
+        # Force XWayland/xcb on Linux: pure Wayland compositors on KDE/GNOME can fail or
+        # hang when mapping child-process windows (matching upstream Siril scripts).
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
     # Deferred until after ensure_installed() has run.
     from PyQt6.QtGui import QIcon, QPixmap
     from PyQt6.QtWidgets import QApplication
@@ -69,6 +84,7 @@ def main() -> int:
     from .resources import load_app_icon_png_bytes, load_dark_stylesheet
 
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     try:
         app.setStyleSheet(load_dark_stylesheet())
     except OSError:
@@ -85,7 +101,12 @@ def main() -> int:
 
     window = MainWindow(bridge)
     window.show()
-    return app.exec()
+    window.raise_()
+    window.activateWindow()
+    try:
+        return app.exec()
+    finally:
+        bridge.disconnect()
 
 
 if __name__ == "__main__":
