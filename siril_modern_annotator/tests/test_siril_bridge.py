@@ -184,3 +184,39 @@ def test_get_technical_metadata_swallows_missing_method_and_other_exceptions():
 
     bridge._siril = _BrokenSiril()
     assert bridge.get_technical_metadata() == {}
+
+
+def test_disconnect_calls_underlying_siril_disconnect():
+    class _DisconnectSiril:
+        def __init__(self):
+            self.connected = True
+            self.disconnect_called = False
+
+        def disconnect(self):
+            self.disconnect_called = True
+            self.connected = False
+
+    bridge = SirilBridge()
+    mock_siril = _DisconnectSiril()
+    bridge._siril = mock_siril
+    assert bridge.connected is True
+    bridge.disconnect()
+    assert mock_siril.disconnect_called is True
+    assert bridge.connected is False
+    assert bridge._siril is None
+
+
+def test_disconnect_swallows_exceptions():
+    class _FailingDisconnectSiril:
+        def __init__(self):
+            self.connected = True
+
+        def disconnect(self):
+            raise RuntimeError("socket close failed")
+
+    bridge = SirilBridge()
+    bridge._siril = _FailingDisconnectSiril()
+    bridge.disconnect()
+    assert bridge.connected is False
+    assert bridge._siril is None
+

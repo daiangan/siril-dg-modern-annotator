@@ -3,43 +3,24 @@
 
 Per RESEARCH.md #5 / ARCHITECTURE.md #2: "Scripts should be single-file scripts" is a
 hard submission requirement for gitlab.com/free-astro/siril-scripts. We develop as a
-normal importable package (siril_modern_annotator/) for testability and clarity, and
-this script flattens it into one .py file at build time.
+modular package (siril_modern_annotator/) for testability and maintainability, and
+this build script compiles and inlines it into a clean, standard, top-to-bottom single
+.py file at build time.
 
-How it works: every module's source is embedded verbatim as a string in a dict, keyed
-by its fully-qualified module name (e.g. "siril_modern_annotator.gui.main_window"). A
-small bootstrap at the top of the generated file registers a sys.meta_path finder/loader
-that serves modules from that dict, so the *real* Python import statements already in
-each module's source (including relative imports like `from ..annotation.models import
-...`) resolve normally at runtime — no import rewriting or namespace flattening needed.
-
-The resources/__init__.py module is special-cased: its dev-tree version reads
-theme_dark.qss from disk via __file__, which the bundle's synthetic modules don't have.
-This script instead generates a replacement source for that one module with the current
-theme_dark.qss contents embedded as a string literal, so the bundle needs nothing on
-disk at runtime and there is no separate copy to keep in sync — it's re-embedded fresh
-on every build.
-
-Two things about the *readability* of the generated file, both added after a real
-Siril scripts maintainer rejected an MR submission of this bundle as unreviewable:
-
-1. Module sources used to be embedded via plain repr() of the whole {name: source}
-   dict -- repr() escapes every real newline in a string as a literal backslash-n
-   rather than an actual line break, so every module's entire source collapsed onto
-   one physical line (one case measured at 269,410 characters) instead of reading as
-   normal multi-line Python. _render_module_sources below embeds each module as a
-   triple-quoted string with real newlines preserved instead, so the generated file
-   scrolls and reads like ordinary source -- see that function's own docstring for the
-   one edge case it still falls back to repr() for.
-2. This codebase's own dev-tree docstrings are deliberately verbose -- they record the
-   real bug reports, user requests, and live-verification steps behind non-obvious
-   decisions, which has repeatedly prevented regressions during development. A reviewer
-   seeing that for the first time, with no access to that history, correctly read it as
-   noise. _condense_docstrings below keeps every *dev-tree* docstring exactly as
-   written (nothing here ever touches siril_modern_annotator/ itself) but, for the
-   bundle output only, keeps just each docstring's first paragraph -- this codebase's
-   docstrings consistently front-load the essential point there, with later paragraphs
-   being supporting detail/history a reviewer doesn't need.
+Architecture of the inlined bundle:
+- No dynamic loaders, no sys.meta_path, no _MODULE_SOURCES dictionary, and no exec().
+- Upstream Siril imports and dependency setup at the top (sirilpy, ensure_installed,
+  Linux X11/xcb platform compatibility, PyQt6/Astropy/NumPy imports).
+- Embedded resources (dark theme QSS and optimized PNG icon bytes) in Section 1.
+- Topological ordering of all codebase modules: catalog reference data, models,
+  geometry, layout, catalog queries, persistence, Siril IPC bridge, export engine,
+  GUI components, and application entry point.
+- Internal relative imports (from .xxx import yyy) are inlined and resolved to the
+  enclosing module namespace.
+- Module and function docstrings are condensed to their primary summary paragraph to
+  keep the single file focused and readable for upstream maintainers.
+- Strict line-length bounding (< 250 characters) to ensure standard editors (Siril script
+  editor, Kate, VS Code) never hang or struggle with rendering.
 """
 
 from __future__ import annotations
@@ -48,37 +29,91 @@ import ast
 import base64
 import re
 import shutil
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_ROOT = REPO_ROOT / "siril_modern_annotator"
-# Siril's Scripts menu lists Python scripts by filename (same convention as its
-# classic .ssf scripts) -- per user request, this controls what shows up in that menu
-# as "DG_Modern_Annotator", not just this build's file naming.
 OUTPUT_PATH = REPO_ROOT / "dist" / "DG_Modern_Annotator.py"
-EXCLUDE_DIR_NAMES = {"tests", "__pycache__"}
 
-# Per user request: every build also drops the finished script straight into Siril's
-# own scripts folder, so testing a fix in the real Siril app is just "re-run this
-# script" -- no manual copy step between a fix and trying it, every iteration of this
-# project's fix-test-report loop.
+# User's local Siril scripts folder for immediate live testing
 SIRIL_SCRIPTS_DIR = Path("/Users/daiangan/siril/scripts")
 
-_RESOURCES_INIT_TEMPLATE = '''"""Bundled resources (single-file build: embedded, not read from disk)."""
+# Module files ordered topologically (dependencies precede dependants)
+MODULE_SECTIONS: list[tuple[str, list[str]]] = [
+    (
+        "Position Catalog Corrections & Reference Data",
+        [
+            "annotation/sh2_corrected_positions.py",
+            "annotation/rcw_corrected_positions.py",
+            "annotation/gum_positions.py",
+            "annotation/common_names.py",
+            "annotation/constellations.py",
+        ],
+    ),
+    (
+        "Models & Geometry",
+        [
+            "annotation/models.py",
+            "annotation/pixel_utils.py",
+            "annotation/wcs.py",
+        ],
+    ),
+    (
+        "Layout & Catalogs",
+        [
+            "annotation/layout.py",
+            "annotation/catalogs.py",
+            "annotation/star_identify.py",
+            "annotation/renderer.py",
+        ],
+    ),
+    (
+        "Persistence & Settings",
+        [
+            "persistence/project.py",
+            "persistence/presets.py",
+            "persistence/last_used.py",
+        ],
+    ),
+    (
+        "Siril Bridge IPC",
+        [
+            "siril_bridge/interface.py",
+        ],
+    ),
+    (
+        "Export Engine",
+        [
+            "export/exporter.py",
+        ],
+    ),
+    (
+        "GUI Components",
+        [
+            "gui/widgets.py",
+            "gui/tools_panel.py",
+            "gui/image_view.py",
+            "gui/annotation_item.py",
+            "gui/overlay_item.py",
+            "gui/object_panel.py",
+            "gui/commands.py",
+            "gui/export_dialog.py",
+            "gui/style_panel.py",
+            "gui/workers.py",
+            "gui/main_window.py",
+        ],
+    ),
+    (
+        "Application Entry Point",
+        [
+            "modern_annotator.py",
+        ],
+    ),
+]
 
-import base64
-
-def load_dark_stylesheet() -> str:
-    return r"""{stylesheet}"""
-
-def load_app_icon_png_bytes() -> bytes:
-    # Binary data as base64 text has no natural line structure to preserve -- unlike
-    # the stylesheet above, repr() here isn't a readability regression.
-    return base64.b64decode({icon_b64!r})
-'''
-
-_HEADER_TEMPLATE = '''#!/usr/bin/env python3
-"""DG Modern Annotator — single-file build for the Siril Scripts menu.
+_HEADER_TEMPLATE = r'''#!/usr/bin/env python3
+"""DG Modern Annotator — interactive annotation tool for plate-solved Siril images.
 Version: {version}
 
 Author: Daian Gan
@@ -93,57 +128,154 @@ Do NOT edit this file directly -- edit the source modules under siril_modern_ann
 and re-run `python build/bundle.py`.
 """
 
+from __future__ import annotations
+
+__version__ = "{version}"
+
+import base64
+import csv
+import json
+import logging
+import math
+import os
+import platform
+import re
 import sys
-import importlib.abc
-import importlib.util
+import types
+import uuid
+import warnings
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields, replace
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Iterable
+from urllib.parse import quote
 
-_MODULE_SOURCES = {modules}
-_PACKAGE_NAMES = {packages!r}
+# Benign warning suppression (Astropy Angle.to_string with NumPy 2.x vectorized formatting)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*do_format \(vectorized\).*",
+    category=RuntimeWarning,
+)
 
+# Linux platform compatibility: force xcb on Linux (matching upstream Siril scripts)
+if platform.system().lower() == "linux":
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
-class _EmbeddedFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-    def find_spec(self, fullname, path, target=None):
-        if fullname not in _MODULE_SOURCES:
-            return None
-        return importlib.util.spec_from_loader(
-            fullname, self, is_package=fullname in _PACKAGE_NAMES
-        )
+try:
+    import sirilpy as s
+    s.ensure_installed(
+        "PyQt6", "astropy", "astroquery", "Pillow", "tifffile",
+        version_constraints=[">=6.4", ">=5.3", ">=0.4", ">=10.0", ">=2021.7"],
+    )
+except ImportError:
+    pass
 
-    def create_module(self, spec):
-        return None  # use default module creation
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+from astropy.io.fits.verify import VerifyWarning
+from astropy.wcs import WCS
+from PyQt6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPoint,
+    QPointF,
+    QRectF,
+    QSettings,
+    QSortFilterProxyModel,
+    QThread,
+    QTimer,
+    QUrl,
+    Qt,
+    pyqtSignal,
+)
+from PyQt6.QtGui import (
+    QAction,
+    QColor,
+    QDesktopServices,
+    QFont,
+    QFontMetricsF,
+    QIcon,
+    QImage,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QPainterPathStroker,
+    QPen,
+    QPixmap,
+    QPolygonF,
+    QShortcut,
+    QTransform,
+    QUndoCommand,
+    QUndoStack,
+)
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDockWidget,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFontComboBox,
+    QFormLayout,
+    QGraphicsItem,
+    QGraphicsObject,
+    QGraphicsPathItem,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressDialog,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
+    QStackedWidget,
+    QStatusBar,
+    QStyle,
+    QStyleOptionGraphicsItem,
+    QStyleOptionSpinBox,
+    QTabWidget,
+    QTableView,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
-    def exec_module(self, module):
-        source = _MODULE_SOURCES[module.__name__]
-        exec(compile(source, "<" + module.__name__ + ">", "exec"), module.__dict__)
-
-
-sys.meta_path.insert(0, _EmbeddedFinder())
-
-from siril_modern_annotator.modern_annotator import main
-
-if __name__ == "__main__":
-    sys.exit(main())
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("siril_modern_annotator")
 '''
-
 
 _TRIPLE_QUOTE_RE = re.compile(r'^([a-zA-Z]{0,2})("""|\'\'\')', re.DOTALL)
 
 
 def _condense_docstring_span(span: str) -> str:
-    """Given the exact original source text of one docstring (quote characters
-    included, e.g. '\"\"\"First paragraph...\\n\\nSecond paragraph...\\n\"\"\"'),
-    returns just its first paragraph, still properly quoted -- or the span unchanged
-    if it's a single-quoted one-liner (already as short as it gets) or already just
-    one paragraph."""
+    """Given the exact original source text of one docstring, returns just its first
+    paragraph, still properly quoted."""
     match = _TRIPLE_QUOTE_RE.match(span)
     if not match:
         return span
-    prefix, quote = match.group(1), match.group(2)
+    prefix, quote_char = match.group(1), match.group(2)
     body = span[len(prefix) + 3 : -3]
     if "\n\n" not in body:
         return span
     first_paragraph = body.split("\n\n", 1)[0].rstrip()
-    return f"{prefix}{quote}{first_paragraph}{quote}"
+    return f"{prefix}{quote_char}{first_paragraph}{quote_char}"
 
 
 def _docstring_nodes(node: ast.AST) -> list[ast.Constant]:
@@ -162,13 +294,7 @@ def _docstring_nodes(node: ast.AST) -> list[ast.Constant]:
 
 
 def _condense_docstrings(source: str) -> str:
-    """Condenses every module/class/function docstring in source down to just its
-    first paragraph -- see this file's own module docstring for why. Locates each
-    docstring by its exact line/column span (available on the ast.Constant node since
-    Python 3.8) and replaces only that span's text, so every other line -- including
-    every inline # comment, which this deliberately leaves untouched -- keeps its
-    original formatting exactly. Processes spans in reverse source order so replacing
-    one never shifts the position of another not yet processed."""
+    """Condenses every module/class/function docstring down to just its first paragraph."""
     tree = ast.parse(source)
     lines = source.splitlines(keepends=True)
     doc_nodes = sorted(_docstring_nodes(tree), key=lambda n: (n.lineno, n.col_offset), reverse=True)
@@ -200,108 +326,190 @@ def _condense_docstrings(source: str) -> str:
     return "".join(lines)
 
 
-def _render_module_sources(modules: dict[str, str]) -> str:
-    """Renders the _MODULE_SOURCES dict as real Python source, embedding each module's
-    text as a *raw* triple-quoted string (r'''...''') with real newlines preserved --
-    see this file's own module docstring for the real maintainer rejection this
-    replaces (plain repr(), which escapes every newline instead of embedding one, and
-    collapsed every module onto one physical line as a result).
-
-    Deliberately raw, not a plain '''...''': a non-raw triple-quoted string still
-    processes backslash escapes in its body, so embedding a module's source verbatim
-    inside one would silently reinterpret any \\n, \\t, \\\\, etc. *already present as
-    literal text* in that source (e.g. inside a regex pattern) -- undefined escapes
-    like \\s/\\d only warn and happen to survive intact, but \\n and friends would
-    silently corrupt the embedded module. Confirmed by a real SyntaxWarning on the
-    first version of this function that used a plain (non-raw) wrapper.
-
-    Triple-*single*-quotes are used as the delimiter since this codebase's own
-    convention is triple-*double*-quotes for every real docstring, so a literal '''
-    collision is not expected in practice -- checked per module regardless, falling
-    back to repr() (still correct, just not as readable) for the rare module where
-    that assumption doesn't hold, or whose source ends in a character a raw string
-    can't safely precede its closing quote with, rather than risk a malformed or
-    silently-corrupted embedding."""
-    lines = ["{"]
-    for name, source in modules.items():
-        if "'''" in source or source.endswith("'") or source.endswith("\\"):
-            lines.append(f"    {name!r}: {source!r},")
-        else:
-            lines.append(f"    {name!r}: r'''{source}''',")
-    lines.append("}")
+def _format_b64_chunks(b64_str: str, chunk_size: int = 76, indent: str = "        ") -> str:
+    """Formats a base64 string into concatenated string literals on separate lines.
+    This avoids creating single hundred-thousand-character physical lines that hang text
+    editors like Siril's built-in script editor or Kate."""
+    lines = [f'{indent}"{b64_str[i:i + chunk_size]}"' for i in range(0, len(b64_str), chunk_size)]
     return "\n".join(lines)
 
 
-def _module_name_and_kind(path: Path) -> tuple[str, bool]:
-    rel = path.relative_to(PACKAGE_ROOT.parent)
-    parts = list(rel.with_suffix("").parts)
-    is_package = parts[-1] == "__init__"
-    if is_package:
-        parts = parts[:-1]
-    return ".".join(parts), is_package
+def _clean_module(source: str) -> tuple[str, str]:
+    """Prepares a single module's source for inlining into the combined script:
+    1. Extracts its module-level docstring (first paragraph) for the section header.
+    2. Strips top-level imports (which are consolidated in the top header).
+    3. Replaces nested internal relative imports inside functions with 'pass'.
+    4. Preserves all classes, functions, constants, comments, and structure.
+    """
+    condensed = _condense_docstrings(source)
+    tree = ast.parse(condensed)
+    lines = condensed.splitlines(keepends=True)
+
+    docstring = ""
+    doc_lines = set()
+    if (
+        tree.body
+        and isinstance(tree.body[0], ast.Expr)
+        and isinstance(tree.body[0].value, ast.Constant)
+        and isinstance(tree.body[0].value.value, str)
+    ):
+        doc_node = tree.body[0]
+        raw_doc = doc_node.value.value.strip()
+        docstring = raw_doc.split("\n\n")[0].strip()
+        doc_lines.update(range(doc_node.lineno, doc_node.end_lineno + 1))
+
+    top_import_lines = set()
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            top_import_lines.update(range(stmt.lineno, stmt.end_lineno + 1))
+
+    nested_internal_imports: list[ast.ImportFrom] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (
+            node.level > 0 or (node.module and node.module.startswith("siril_modern_annotator"))
+        ):
+            if node.lineno not in top_import_lines:
+                nested_internal_imports.append(node)
+
+    for imp in nested_internal_imports:
+        indent = len(lines[imp.lineno - 1]) - len(lines[imp.lineno - 1].lstrip())
+        for line_idx in range(imp.lineno, imp.end_lineno + 1):
+            if line_idx == imp.lineno:
+                lines[line_idx - 1] = " " * indent + "pass  # inlined internal import\n"
+            else:
+                lines[line_idx - 1] = ""
+
+    filtered_lines: list[str] = []
+    for idx, line in enumerate(lines, 1):
+        if idx in doc_lines or idx in top_import_lines:
+            continue
+        filtered_lines.append(line)
+
+    cleaned_source = "".join(filtered_lines).strip()
+    return docstring, cleaned_source
 
 
-def collect_modules() -> tuple[dict[str, str], list[str]]:
-    modules: dict[str, str] = {}
-    packages: list[str] = []
+def _render_resources_section() -> str:
     stylesheet_path = PACKAGE_ROOT / "resources" / "theme_dark.qss"
     stylesheet_text = stylesheet_path.read_text(encoding="utf-8")
-    # _RESOURCES_INIT_TEMPLATE embeds this raw inside a r"""...""" literal (see its own
-    # comment) -- fail loudly at build time if a future edit to the stylesheet ever
-    # introduces a literal \"\"\" sequence, rather than silently emit a broken bundle.
     if '"""' in stylesheet_text:
         raise RuntimeError(
             f"{stylesheet_path} contains a literal \"\"\" sequence, which would break "
-            "_RESOURCES_INIT_TEMPLATE's raw triple-quote embedding."
+            "raw triple-quote embedding."
         )
+
     icon_path = PACKAGE_ROOT / "resources" / "icon.png"
     icon_b64 = base64.b64encode(icon_path.read_bytes()).decode("ascii")
+    icon_b64_chunks = _format_b64_chunks(icon_b64)
 
-    for path in sorted(PACKAGE_ROOT.rglob("*.py")):
-        rel_parts = path.relative_to(PACKAGE_ROOT).parts
-        if any(part in EXCLUDE_DIR_NAMES for part in rel_parts):
-            continue
-        name, is_package = _module_name_and_kind(path)
-        if name == "siril_modern_annotator.resources":
-            source = _RESOURCES_INIT_TEMPLATE.format(stylesheet=stylesheet_text, icon_b64=icon_b64)
-        else:
-            source = path.read_text(encoding="utf-8")
-        modules[name] = source
-        if is_package:
-            packages.append(name)
+    return f'''# =============================================================================
+# Section 1: Embedded Resources
+# =============================================================================
 
-    return modules, packages
+_DARK_THEME_QSS = r"""{stylesheet_text}"""
 
 
-def _extract_version(modules: dict[str, str]) -> str:
-    # Read from the already-collected __init__.py source text rather than importing
-    # the package, since bundle.py is normally invoked as a standalone script (its own
-    # directory on sys.path, not the repo root) -- an `import siril_modern_annotator`
-    # here would not reliably resolve.
-    match = re.search(r'__version__\s*=\s*"([^"]+)"', modules["siril_modern_annotator"])
+def load_dark_stylesheet() -> str:
+    return _DARK_THEME_QSS
+
+
+_APP_ICON_PNG_BYTES = base64.b64decode(
+{icon_b64_chunks}
+)
+
+
+def load_app_icon_png_bytes() -> bytes:
+    return _APP_ICON_PNG_BYTES
+'''
+
+
+def _extract_version() -> str:
+    init_file = PACKAGE_ROOT / "__init__.py"
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', init_file.read_text(encoding="utf-8"))
     if match is None:
         raise RuntimeError("Could not find __version__ in siril_modern_annotator/__init__.py")
     return match.group(1)
 
 
 def build() -> Path:
-    modules, packages = collect_modules()
-    version = _extract_version(modules)
-    # Condensed for the bundle output only -- collect_modules() always reads the real
-    # dev-tree files verbatim, and nothing here writes back to siril_modern_annotator/
-    # itself. See this file's own module docstring for why this exists.
-    condensed_modules = {name: _condense_docstrings(source) for name, source in modules.items()}
-    rendered_modules = _render_module_sources(condensed_modules)
+    version = _extract_version()
+    parts: list[str] = [_HEADER_TEMPLATE.format(version=version), _render_resources_section()]
+
+    section_num = 2
+    for section_title, files in MODULE_SECTIONS:
+        parts.append(
+            f"# =============================================================================\n"
+            f"# Section {section_num}: {section_title}\n"
+            f"# =============================================================================\n"
+        )
+        section_num += 1
+
+        for rel_file in files:
+            path = PACKAGE_ROOT / rel_file
+            if not path.is_file():
+                raise FileNotFoundError(f"Module file not found: {path}")
+
+            doc, cleaned = _clean_module(path.read_text(encoding="utf-8"))
+            doc_comment = "\n".join(f"# {line}" for line in doc.splitlines()) if doc else ""
+
+            parts.append(
+                f"# -----------------------------------------------------------------------------\n"
+                f"# Module: {rel_file}\n"
+                f"{doc_comment}\n"
+                f"# -----------------------------------------------------------------------------\n"
+            )
+            parts.append(cleaned)
+            parts.append("\n")
+
+            # Inlined module namespace objects for persistence modules
+            if rel_file == "persistence/presets.py":
+                parts.append(
+                    "preset_store = types.SimpleNamespace(\n"
+                    "    BUILTIN_PRESETS=BUILTIN_PRESETS,\n"
+                    "    DEFAULT_PRESET_NAME=DEFAULT_PRESET_NAME,\n"
+                    "    default_preset=default_preset,\n"
+                    "    default_preset_for_image=default_preset_for_image,\n"
+                    "    default_overlay_settings_for_image=default_overlay_settings_for_image,\n"
+                    "    load_user_presets=load_user_presets,\n"
+                    "    save_user_preset=save_user_preset,\n"
+                    "    delete_user_preset=delete_user_preset,\n"
+                    "    all_presets=all_presets,\n"
+                    ")\n\n"
+                )
+            elif rel_file == "persistence/last_used.py":
+                parts.append(
+                    "last_used_store = types.SimpleNamespace(\n"
+                    "    save_last_used_style=save_last_used_style,\n"
+                    "    load_last_used_style=load_last_used_style,\n"
+                    "    save_last_used_catalogs=save_last_used_catalogs,\n"
+                    "    load_last_used_catalogs=load_last_used_catalogs,\n"
+                    "    save_last_used_catalog_colors=save_last_used_catalog_colors,\n"
+                    "    load_last_used_catalog_colors=load_last_used_catalog_colors,\n"
+                    "    save_last_used_export_settings=save_last_used_export_settings,\n"
+                    "    load_last_used_export_settings=load_last_used_export_settings,\n"
+                    "    save_last_used_overlay_settings=save_last_used_overlay_settings,\n"
+                    "    apply_last_used_overlay_settings=apply_last_used_overlay_settings,\n"
+                    ")\n\n"
+                )
+
+    full_bundle = "\n".join(parts)
+
+    # Validate that the entire generated script compiles cleanly
+    compile(full_bundle, str(OUTPUT_PATH), "exec")
+
+    # Safety check on line lengths (guard against editor hang bugs)
+    for line_idx, line in enumerate(full_bundle.splitlines(), 1):
+        if len(line) > 300:
+            raise ValueError(f"Line {line_idx} exceeds 300 characters ({len(line)} chars): {line[:80]}...")
+
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    content = _HEADER_TEMPLATE.format(modules=rendered_modules, packages=packages, version=version)
-    OUTPUT_PATH.write_text(content, encoding="utf-8")
+    OUTPUT_PATH.write_text(full_bundle, encoding="utf-8")
     return OUTPUT_PATH
 
 
 def copy_to_siril_scripts(output_path: Path) -> Path | None:
     """Copies the built script into SIRIL_SCRIPTS_DIR, returning the destination path,
-    or None if that folder doesn't exist on this machine (so this stays a no-op rather
-    than a hard failure anywhere else this build script might run)."""
+    or None if that folder doesn't exist on this machine."""
     if not SIRIL_SCRIPTS_DIR.is_dir():
         return None
     dest = SIRIL_SCRIPTS_DIR / output_path.name
@@ -312,7 +520,8 @@ def copy_to_siril_scripts(output_path: Path) -> Path | None:
 if __name__ == "__main__":
     output = build()
     size_kb = output.stat().st_size / 1024
-    print(f"Wrote {output} ({size_kb:.1f} KB)")
+    lines_count = len(output.read_text(encoding="utf-8").splitlines())
+    print(f"Wrote {output} ({size_kb:.1f} KB, {lines_count} lines)")
     copied_to = copy_to_siril_scripts(output)
     if copied_to is not None:
         print(f"Copied to {copied_to}")

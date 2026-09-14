@@ -1880,3 +1880,11 @@ class MainWindow(QMainWindow):
         self.object_panel.set_annotations(self.annotations)
         self.style_panel.set_global_style(self.global_style_holder[0])
         self.style_panel.set_overlay_settings(self.overlay_settings)
+
+    def closeEvent(self, event) -> None:
+        try:
+            self.bridge.disconnect()
+        except Exception:
+            logger.debug("Error disconnecting bridge in closeEvent", exc_info=True)
+        super().closeEvent(event)
+

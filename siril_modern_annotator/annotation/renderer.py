@@ -17,7 +17,7 @@ from typing import Callable
 import numpy as np
 
 from .constellations import ConstellationLine, ConstellationName
-from .layout import _LABEL_GAP_MIN_PX, _LABEL_GAP_RADIUS_FRACTION, BBox
+from .layout import _LABEL_GAP_MIN_PX, _LABEL_GAP_RADIUS_FRACTION, BBox, TextMeasurer
 from .models import (
     Annotation,
     CompassStyle,
@@ -35,8 +35,6 @@ from .models import (
     StylePreset,
 )
 from .wcs import SirilWcs
-
-TextMeasurer = Callable[[str, LabelStyle], tuple[float, float]]
 
 # Below this marker-to-label-center distance, the label is considered "attached" and no
 # connector line is drawn (brief #10's connector is only for labels moved away).

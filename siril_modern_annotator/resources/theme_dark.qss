@@ -1,17 +1,9 @@
 /* Siril Modern Annotator — dark theme (brief #4, #37) */
 
 * {
-    /* "Inter" isn't bundled with either macOS or Windows by default -- it silently
-       substituted on both, just loudly (a Qt console warning) on macOS and quietly
-       (fell back to Tahoma) on Windows. "Verdana" ships with both out of the box, so
-       this actually renders as chosen instead of an invisible fallback. The
-       OS-specific names that used to follow it here ("Segoe UI", "Helvetica Neue")
-       are deliberately gone too -- each one is missing on whichever platform it isn't
-       native to, so Qt logs the same "missing font family" warning for it there;
-       since Verdana alone already covers both platforms, they were dead weight that
-       only generated console noise. Plain "sans-serif" stays as a generic (not a
-       specific font) last-resort, which Qt always resolves without warning. */
-    font-family: "Verdana", sans-serif;
+    /* "Verdana" ships with macOS, Windows, and Linux out of the box, so
+       this renders cleanly across platforms without missing font family warnings. */
+    font-family: "Verdana";
     font-size: 12px;
 }
 
