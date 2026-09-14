@@ -242,7 +242,7 @@ def test_bundle_main_window_instantiation(tmp_path):
     code_obj = compile(content, "DG_Modern_Annotator.py", "exec")
     exec(code_obj, ns)
 
-    assert ns.get("__version__") == "0.4.3"
+    assert ns.get("__version__") == "0.5.0"
 
     bridge = MagicMock()
     bridge.get_system_catalogue_dir.return_value = tmp_path
@@ -250,7 +250,7 @@ def test_bundle_main_window_instantiation(tmp_path):
 
     window = ns["MainWindow"](bridge)
 
-    assert window.windowTitle() == "DG Modern Annotator v0.4.3"
+    assert window.windowTitle() == "DG Modern Annotator v0.5.0"
     assert window.style_panel is not None
     assert window.object_panel is not None
     assert window.tools_panel is not None
