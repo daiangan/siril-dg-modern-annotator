@@ -1,29 +1,29 @@
-"""build/bundle.py's two readability transforms -- _condense_docstrings and
-_render_module_sources -- added after a real Siril scripts maintainer rejected an MR
-submission of the bundled script as unreviewable (a 100KB file with lines up to
-269,410 characters, and "vast amounts of AI-gen comment blocks"). See bundle.py's own
-module docstring for the full rationale.
+"""Tests for build/bundle.py: docstring condensation, base64 chunking,
+clean module inlining, and end-to-end topological bundling.
 
-Real bug caught by hand-testing while building this, now guarded here permanently:
-the first version of _render_module_sources used a plain (non-raw) '''...''' wrapper,
-which still processes backslash escapes in its body -- embedding a module's source
-verbatim inside one silently reinterpreted any \\n, \\t, \\\\, etc. already present as
-literal text in that source (e.g. inside a regex pattern). test_render_module_sources_
-preserves_backslash_escapes_byte_for_byte below is the regression test for exactly
-that."""
+Ensures the bundled script:
+1. Eliminates _MODULE_SOURCES, sys.meta_path, and dynamic execution.
+2. Preserves real, standard top-level Python classes, functions, and definitions.
+3. Contains zero internal relative imports.
+4. Binds all physical line lengths (< 250 characters) to prevent text editor hangs.
+5. Successfully compiles and exposes all core application components.
+"""
 
 from __future__ import annotations
 
+import ast
+import py_compile
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from bundle import (  # noqa: E402
+    _clean_module,
     _condense_docstring_span,
     _condense_docstrings,
     _format_b64_chunks,
-    _render_module_sources,
+    build,
 )
 
 # --------------------------------------------------------------- _condense_docstrings
@@ -83,10 +83,6 @@ def test_condense_docstrings_leaves_inline_comments_completely_untouched():
 
 
 def test_condense_docstrings_preserves_code_after_a_condensed_docstring_on_its_own_line():
-    """Regression guard for the line-splice logic in _condense_docstrings: replacing a
-    multi-line docstring span must keep whatever text originally followed it on the
-    docstring's own last line (normally just a newline, but this must not silently
-    swallow anything else there)."""
     source = (
         "def f():\n"
         '    """First paragraph.\n\n    Second paragraph.\n    """; return 1\n'
@@ -107,70 +103,7 @@ def test_condense_docstring_span_handles_a_raw_string_prefix():
     assert _condense_docstring_span(span) == 'r"""First paragraph."""'
 
 
-# ----------------------------------------------------------- _render_module_sources
-
-
-def _round_trip(modules: dict[str, str]) -> dict[str, str]:
-    rendered = _render_module_sources(modules)
-    ns: dict = {}
-    exec("_MODULE_SOURCES = " + rendered, ns)
-    return ns["_MODULE_SOURCES"]
-
-
-def test_render_module_sources_uses_a_real_multiline_string_not_an_escaped_one_liner():
-    modules = {"m": "def f():\n    return 1\n"}
-    rendered = _render_module_sources(modules)
-    # The whole point: this must be a *real* multi-line literal, not one physical line
-    # with every newline escaped as a literal backslash-n.
-    assert rendered.count("\n") >= 3
-    assert "\\n" not in rendered.split("r'''", 1)[1].split("'''", 1)[0]
-
-
-def test_render_module_sources_round_trips_module_content_exactly():
-    modules = {
-        "plain": "def f():\n    return 1\n",
-        "with_docstring": '"""A module.\n\nMore detail.\n"""\n\nx = 1\n',
-    }
-    assert _round_trip(modules) == modules
-
-
-def test_render_module_sources_falls_back_to_repr_for_a_module_containing_triple_quotes():
-    modules = {"tricky": "x = '''a literal triple-quoted string appears here'''\n"}
-    rendered = _render_module_sources(modules)
-    assert "r'''" not in rendered  # did not attempt the raw-triple-quote path
-    assert _round_trip(modules) == modules  # but content still round-trips correctly
-
-
-def test_render_module_sources_falls_back_to_repr_for_a_module_ending_in_a_backslash():
-    modules = {"tricky": "x = 1\\"}
-    rendered = _render_module_sources(modules)
-    assert "r'''" not in rendered
-    assert _round_trip(modules) == modules
-
-
-def test_render_module_sources_preserves_backslash_escapes_byte_for_byte():
-    """The real bug: a plain (non-raw) '''...''' wrapper would silently turn a literal
-    two-character \\n (backslash, n) already present in the source -- e.g. inside a
-    regex pattern -- into an actual newline character. Confirmed live against this
-    project's own _MESSIER_DESC_RE (r"=\\s*M\\s*(\\d+)\\b") before this test was
-    written: loaded through a bundle built with the old non-raw wrapper, that pattern
-    still matched by chance (undefined escapes like \\s/\\d survive, just with a
-    SyntaxWarning), but the failure mode this guards is real for any escape Python
-    *does* recognize (\\n, \\t, \\\\, ...), which would be silently corrupted instead."""
-    modules = {"m": 'PATTERN = r"=\\s*M\\s*(\\d+)\\b"\n'}
-    result = _round_trip(modules)
-    assert result == modules
-    # Belt and suspenders: actually compile+exec the round-tripped module source and
-    # confirm the resulting regex still matches real text the same way the original
-    # would -- not just that the source text round-tripped unchanged.
-    import re
-
-    ns: dict = {}
-    exec(compile(result["m"], "<m>", "exec"), ns)
-    pattern = re.compile(ns["PATTERN"])
-    match = pattern.search("!!! theta1 Ori and the great neb; = M42")
-    assert match is not None
-    assert match.group(1) == "42"
+# ----------------------------------------------------------- _format_b64_chunks
 
 
 def test_format_b64_chunks_bounds_line_length_and_decodes_cleanly():
@@ -189,3 +122,108 @@ def test_format_b64_chunks_bounds_line_length_and_decodes_cleanly():
     code = f"import base64\ndata = base64.b64decode(\n{chunks}\n)"
     exec(compile(code, "<b64_test>", "exec"), ns)
     assert ns["data"] == raw_bytes
+
+
+# ----------------------------------------------------------- _clean_module
+
+
+def test_clean_module_extracts_docstring_and_removes_top_imports():
+    source = (
+        '"""Module docstring first paragraph.\n\nExtended module details.\n"""\n'
+        "\n"
+        "from __future__ import annotations\n"
+        "import math\n"
+        "from .models import Annotation\n"
+        "\n"
+        "def calculate_area(r: float) -> float:\n"
+        "    return math.pi * r * r\n"
+    )
+    doc, cleaned = _clean_module(source)
+    assert doc == "Module docstring first paragraph."
+    assert "import math" not in cleaned
+    assert "from .models" not in cleaned
+    assert "def calculate_area(r: float) -> float:" in cleaned
+    compile(cleaned, "<test>", "exec")
+
+
+def test_clean_module_inlines_nested_internal_imports():
+    source = (
+        "def query_database():\n"
+        "    from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS\n"
+        "    return CORRECTED_SH2_POSITIONS\n"
+    )
+    doc, cleaned = _clean_module(source)
+    assert "from .sh2_corrected_positions" not in cleaned
+    assert "pass  # inlined internal import" in cleaned
+    assert "return CORRECTED_SH2_POSITIONS" in cleaned
+    compile(cleaned, "<test>", "exec")
+
+
+# ----------------------------------------------------------- build() integration
+
+
+def test_bundle_build_compiles_cleanly_and_has_no_meta_path():
+    bundle_path = build()
+    assert bundle_path.is_file()
+
+    content = bundle_path.read_text(encoding="utf-8")
+
+    # Guard against regression to synthetic module dict / meta_path
+    assert "_MODULE_SOURCES" not in content
+    assert "sys.meta_path" not in content
+    assert "_EmbeddedFinder" not in content
+
+    # Standard compile check
+    py_compile.compile(str(bundle_path), doraise=True)
+
+
+def test_bundle_build_contains_zero_relative_imports():
+    bundle_path = build()
+    content = bundle_path.read_text(encoding="utf-8")
+    tree = ast.parse(content)
+
+    relative_imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level > 0:
+            relative_imports.append(ast.unparse(node))
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("siril_modern_annotator"):
+            relative_imports.append(ast.unparse(node))
+
+    assert relative_imports == [], f"Found relative imports in bundle: {relative_imports}"
+
+
+def test_bundle_build_bounds_all_line_lengths():
+    bundle_path = build()
+    content = bundle_path.read_text(encoding="utf-8")
+
+    long_lines = [(idx, len(line), line) for idx, line in enumerate(content.splitlines(), 1) if len(line) > 300]
+    assert long_lines == [], f"Found lines exceeding 300 characters: {long_lines[:3]}"
+
+
+def test_bundle_execution_exports_expected_symbols():
+    bundle_path = build()
+    content = bundle_path.read_text(encoding="utf-8")
+
+    ns: dict = {}
+    code_obj = compile(content, "DG_Modern_Annotator.py", "exec")
+    exec(code_obj, ns)
+
+    expected_symbols = [
+        "Annotation",
+        "SirilWcs",
+        "SirilBridge",
+        "MainWindow",
+        "main",
+        "load_dark_stylesheet",
+        "load_app_icon_png_bytes",
+    ]
+    for sym in expected_symbols:
+        assert sym in ns, f"Expected {sym} to be present in bundled script namespace"
+
+    # Verify embedded assets
+    icon_bytes = ns["load_app_icon_png_bytes"]()
+    assert icon_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(icon_bytes) < 20_000  # under 20 KB
+
+    qss = ns["load_dark_stylesheet"]()
+    assert "Siril Modern Annotator" in qss

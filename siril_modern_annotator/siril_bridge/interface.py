@@ -41,8 +41,7 @@ class NoImageLoadedError(SirilBridgeError):
     pass
 
 
-class NotPlateSolvedError(SirilBridgeError):
-    pass
+from ..annotation.wcs import NotPlateSolvedError
 
 
 @dataclass(frozen=True)
