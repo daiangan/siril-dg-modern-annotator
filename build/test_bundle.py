@@ -227,3 +227,32 @@ def test_bundle_execution_exports_expected_symbols():
 
     qss = ns["load_dark_stylesheet"]()
     assert "Siril Modern Annotator" in qss
+
+
+def test_bundle_main_window_instantiation(tmp_path):
+    from unittest.mock import MagicMock
+    from PyQt6.QtWidgets import QApplication
+
+    _ = QApplication.instance() or QApplication([])
+
+    bundle_path = build()
+    content = bundle_path.read_text(encoding="utf-8")
+
+    ns: dict = {}
+    code_obj = compile(content, "DG_Modern_Annotator.py", "exec")
+    exec(code_obj, ns)
+
+    assert ns.get("__version__") == "0.4.3"
+
+    bridge = MagicMock()
+    bridge.get_system_catalogue_dir.return_value = tmp_path
+    bridge.has_image.return_value = False
+
+    window = ns["MainWindow"](bridge)
+
+    assert window.windowTitle() == "DG Modern Annotator v0.4.3"
+    assert window.style_panel is not None
+    assert window.object_panel is not None
+    assert window.tools_panel is not None
+    window.close()
+

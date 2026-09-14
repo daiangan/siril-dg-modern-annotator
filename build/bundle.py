@@ -130,6 +130,8 @@ and re-run `python build/bundle.py`.
 
 from __future__ import annotations
 
+__version__ = "{version}"
+
 import base64
 import csv
 import json
@@ -139,6 +141,7 @@ import os
 import platform
 import re
 import sys
+import types
 import uuid
 import warnings
 from abc import ABC, abstractmethod
@@ -458,11 +461,36 @@ def build() -> Path:
             parts.append(cleaned)
             parts.append("\n")
 
-            # Inlined module aliases for persistence modules
+            # Inlined module namespace objects for persistence modules
             if rel_file == "persistence/presets.py":
-                parts.append("preset_store = sys.modules[__name__]\n\n")
+                parts.append(
+                    "preset_store = types.SimpleNamespace(\n"
+                    "    BUILTIN_PRESETS=BUILTIN_PRESETS,\n"
+                    "    DEFAULT_PRESET_NAME=DEFAULT_PRESET_NAME,\n"
+                    "    default_preset=default_preset,\n"
+                    "    default_preset_for_image=default_preset_for_image,\n"
+                    "    default_overlay_settings_for_image=default_overlay_settings_for_image,\n"
+                    "    load_user_presets=load_user_presets,\n"
+                    "    save_user_preset=save_user_preset,\n"
+                    "    delete_user_preset=delete_user_preset,\n"
+                    "    all_presets=all_presets,\n"
+                    ")\n\n"
+                )
             elif rel_file == "persistence/last_used.py":
-                parts.append("last_used_store = sys.modules[__name__]\n\n")
+                parts.append(
+                    "last_used_store = types.SimpleNamespace(\n"
+                    "    save_last_used_style=save_last_used_style,\n"
+                    "    load_last_used_style=load_last_used_style,\n"
+                    "    save_last_used_catalogs=save_last_used_catalogs,\n"
+                    "    load_last_used_catalogs=load_last_used_catalogs,\n"
+                    "    save_last_used_catalog_colors=save_last_used_catalog_colors,\n"
+                    "    load_last_used_catalog_colors=load_last_used_catalog_colors,\n"
+                    "    save_last_used_export_settings=save_last_used_export_settings,\n"
+                    "    load_last_used_export_settings=load_last_used_export_settings,\n"
+                    "    save_last_used_overlay_settings=save_last_used_overlay_settings,\n"
+                    "    apply_last_used_overlay_settings=apply_last_used_overlay_settings,\n"
+                    ")\n\n"
+                )
 
     full_bundle = "\n".join(parts)
 
