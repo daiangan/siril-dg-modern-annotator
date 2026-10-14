@@ -236,6 +236,8 @@ class MainWindow(QMainWindow):
         self._catalog_worker: CatalogFetchWorker | None = None
         self._star_identify_worker: StarIdentifyWorker | None = None
         self._export_worker: ExportWorker | None = None
+        self._active_workers: list[QThread] = []
+        self._catalog_fetch_generation: int = 0
         self._progress_dialog: QProgressDialog | None = None
 
         self._build_ui()
@@ -666,20 +668,33 @@ class MainWindow(QMainWindow):
             return False
         return count <= _USER_DSO_DEFAULT_ON_MAX_ENTRIES
 
+    def _track_worker(self, worker: QThread) -> None:
+        self._active_workers.append(worker)
+        worker.finished.connect(lambda: self._on_worker_finished(worker))
+
+    def _on_worker_finished(self, worker: QThread) -> None:
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
+
     def _start_catalog_fetch(self, catalogs: set[str]) -> None:
         if self.wcs is None:
             return
-        # Per user request: this table sits empty with no explanation while the
-        # (already background-threaded, non-blocking) initial catalog query runs --
-        # object_panel.set_annotations turns this back off once real results arrive.
         self.object_panel.set_loading(True)
-        self._catalog_worker = CatalogFetchWorker(self._catalog_provider(), self.wcs, catalogs, mag_limit=None)
-        self._catalog_worker.progress.connect(lambda msg: self.connection_label.setText(msg))
-        self._catalog_worker.succeeded.connect(self._on_catalog_results)
-        self._catalog_worker.failed.connect(self._on_catalog_failed)
-        self._catalog_worker.start()
+        self._catalog_fetch_generation += 1
+        gen = self._catalog_fetch_generation
+        worker = CatalogFetchWorker(
+            self._catalog_provider(), self.wcs, catalogs, mag_limit=None, parent=self
+        )
+        self._catalog_worker = worker
+        self._track_worker(worker)
+        worker.progress.connect(lambda msg: self.connection_label.setText(msg))
+        worker.succeeded.connect(lambda results, g=gen: self._on_catalog_results(results, g))
+        worker.failed.connect(lambda msg, g=gen: self._on_catalog_failed(msg, g))
+        worker.start()
 
-    def _on_catalog_results(self, annotations: list[Annotation]) -> None:
+    def _on_catalog_results(self, annotations: list[Annotation], generation: int | None = None) -> None:
+        if generation is not None and generation != self._catalog_fetch_generation:
+            return
         self.annotations = annotations
         auto_arrange(
             self.annotations, self.global_style_holder[0],
@@ -702,11 +717,6 @@ class MainWindow(QMainWindow):
         last_used_store.save_last_used_catalogs(self.active_catalogs)
 
     def _on_catalog_color_changed(self, catalog: str, color: str) -> None:
-        # Mutates catalog_colors in place (not a reassignment) -- every MarkerItem/
-        # LabelItem/ConnectorItem was handed this exact dict at construction (see
-        # _add_scene_items_for), so they all pick up the new color on their next
-        # repaint without needing a full _refresh_all-style walk to reassign a
-        # reference, the way global_style changes do.
         self.catalog_colors[catalog] = color
         last_used_store.save_last_used_catalog_colors(self.catalog_colors)
         for ann in self.annotations:
@@ -718,8 +728,6 @@ class MainWindow(QMainWindow):
                 marker.update()
             label = self.label_items.get(ann.id)
             if label is not None:
-                # Only repaints -- background color doesn't affect the label's box
-                # size (font metrics/padding do), so no prepareGeometryChange needed.
                 label.update()
             self._update_connector(ann)
         self.image_view.scene_.update()
@@ -727,14 +735,25 @@ class MainWindow(QMainWindow):
     def _fetch_additional_catalog(self, catalog: str) -> None:
         if self.wcs is None:
             return
-        worker = CatalogFetchWorker(self._catalog_provider(), self.wcs, {catalog}, mag_limit=None)
+        self._catalog_fetch_generation += 1
+        gen = self._catalog_fetch_generation
+        worker = CatalogFetchWorker(
+            self._catalog_provider(), self.wcs, {catalog}, mag_limit=None, parent=self
+        )
+        self._catalog_worker = worker
+        self._track_worker(worker)
         worker.progress.connect(lambda msg: self.connection_label.setText(msg))
-        worker.succeeded.connect(lambda results, cat=catalog: self._on_additional_catalog_results(cat, results))
-        worker.failed.connect(self._on_catalog_failed)
-        self._catalog_worker = worker  # keep a reference so it isn't garbage-collected mid-flight
+        worker.succeeded.connect(
+            lambda results, cat=catalog, g=gen: self._on_additional_catalog_results(cat, results, g)
+        )
+        worker.failed.connect(lambda msg, g=gen: self._on_catalog_failed(msg, g))
         worker.start()
 
-    def _on_additional_catalog_results(self, catalog: str, results: list[Annotation]) -> None:
+    def _on_additional_catalog_results(
+        self, catalog: str, results: list[Annotation], generation: int | None = None
+    ) -> None:
+        if "active_catalogs" in self.__dict__ and catalog not in self.active_catalogs:
+            return
         # De-dupe against what's already loaded (angular proximity, same rule as
         # CompositeProvider) so re-enabling a catalog doesn't duplicate objects another
         # already-active catalog also happens to carry (e.g. Messier + NGC overlap).
@@ -802,11 +821,10 @@ class MainWindow(QMainWindow):
         self.object_panel.set_annotations(self.annotations)
         self.connection_label.setText(f"{len(self.annotations)} objects — {self.source_identifier}")
 
-    def _on_catalog_failed(self, message: str) -> None:
+    def _on_catalog_failed(self, message: str, generation: int | None = None) -> None:
+        if generation is not None and generation != self._catalog_fetch_generation:
+            return
         logger.error("Catalog fetch failed: %s", message)
-        # Harmless no-op if this wasn't the initial fetch (the table was already
-        # showing) -- covers the case where the initial query itself fails, which
-        # otherwise leaves the "Loading objects..." placeholder stuck forever.
         self.object_panel.set_loading(False)
         QMessageBox.warning(
             self, "Catalog Query Failed",
@@ -1327,11 +1345,12 @@ class MainWindow(QMainWindow):
             return
         ra, dec = self.wcs.pixel_to_world(x, y)
         radius_arcsec = default_radius_arcsec(self.arcsec_per_px)
-        worker = StarIdentifyWorker(ra, dec, radius_arcsec)
+        worker = StarIdentifyWorker(ra, dec, radius_arcsec, parent=self)
+        self._star_identify_worker = worker
+        self._track_worker(worker)
         worker.progress.connect(lambda msg: self.connection_label.setText(msg))
         worker.succeeded.connect(lambda candidates, pos=screen_pos: self._on_star_identify_results(candidates, pos))
         worker.failed.connect(self._on_star_identify_failed)
-        self._star_identify_worker = worker
         worker.start()
 
     def _on_star_identify_results(self, candidates: list[StarCandidate], screen_pos) -> None:
@@ -1793,10 +1812,12 @@ class MainWindow(QMainWindow):
         self._export_worker = ExportWorker(
             Path(path_str), pixel_data, self.annotations, self.global_style_holder[0],
             settings, self.arcsec_per_px, self.icc_profile,
+            parent=self,
             catalog_colors=self.catalog_colors,
             wcs=self.wcs, overlay_settings=self.overlay_settings,
             constellation_lines=self._constellation_lines, constellation_names=self._constellation_names,
         )
+        self._track_worker(self._export_worker)
         self._export_worker.progress.connect(self._progress_dialog.setLabelText)
         self._export_worker.succeeded.connect(self._on_export_succeeded)
         self._export_worker.failed.connect(self._on_export_failed)
@@ -1882,6 +1903,20 @@ class MainWindow(QMainWindow):
         self.style_panel.set_overlay_settings(self.overlay_settings)
 
     def closeEvent(self, event) -> None:
+        for worker in list(self._active_workers):
+            try:
+                worker.blockSignals(True)
+                worker.requestInterruption()
+                worker.quit()
+            except Exception:
+                pass
+        for worker in list(self._active_workers):
+            try:
+                worker.wait(1000)
+            except Exception:
+                pass
+        self._active_workers.clear()
+
         try:
             self.bridge.disconnect()
         except Exception:

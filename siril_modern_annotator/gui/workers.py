@@ -44,20 +44,20 @@ class CatalogFetchWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             self.progress.emit("Querying catalogs...")
             results = self._provider.query(self._wcs, self._catalogs, self._mag_limit)
+            if self.isInterruptionRequested():
+                return
             self.progress.emit(f"Found {len(results)} objects in field.")
             self.succeeded.emit(results)
-        except Exception as exc:  # noqa: BLE001 - surface any failure to the GUI, never crash silently
-            self.failed.emit(str(exc))
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
 
 
 class StarIdentifyWorker(QThread):
-    """Right-click "Identify Star" (main_window.py's _identify_star_at) -- a SIMBAD
-    coordinate lookup for a single point, same 3-signal shape as CatalogFetchWorker
-    above but answering "closest star-type object(s) to this point" rather than
-    "everything in this field for these catalogs"."""
-
     progress = pyqtSignal(str)
     succeeded = pyqtSignal(list)  # list[StarCandidate]
     failed = pyqtSignal(str)
@@ -70,11 +70,16 @@ class StarIdentifyWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             self.progress.emit("Querying SIMBAD...")
             results = identify_stars(self._ra, self._dec, self._radius_arcsec)
+            if self.isInterruptionRequested():
+                return
             self.succeeded.emit(results)
-        except Exception as exc:  # noqa: BLE001 - surface any failure to the GUI, never crash silently
-            self.failed.emit(str(exc))
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
 
 
 class ExportWorker(QThread):
@@ -116,6 +121,8 @@ class ExportWorker(QThread):
         from ..export.exporter import export_image
 
         try:
+            if self.isInterruptionRequested():
+                return
             result = export_image(
                 self._output_path,
                 self._pixel_data,
@@ -131,6 +138,8 @@ class ExportWorker(QThread):
                 constellation_lines=self._constellation_lines,
                 constellation_names=self._constellation_names,
             )
-            self.succeeded.emit(str(result))
+            if not self.isInterruptionRequested():
+                self.succeeded.emit(str(result))
         except Exception as exc:  # noqa: BLE001
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))

@@ -1406,12 +1406,11 @@ class VizierProvider(CatalogProvider):
                     timeout_seconds=15,
                 )
             except Exception as exc:
-                _vizier_available = False
                 logger.warning(
-                    "VizieR query failed for %s (%s); will not retry this session: %s",
+                    "VizieR query failed for %s (%s): %s",
                     vizier_id, type(exc).__name__, exc,
                 )
-                return results
+                continue
             if not table_list:
                 continue
             parsed = self._rows_to_annotations(table_list[0], vizier_id, wcs, mag_limit)
