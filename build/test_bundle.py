@@ -151,11 +151,15 @@ def test_clean_module_inlines_nested_internal_imports():
         "def query_database():\n"
         "    from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS\n"
         "    return CORRECTED_SH2_POSITIONS\n"
+        "\n"
+        "def empty_func():\n"
+        "    from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS\n"
     )
     doc, cleaned = _clean_module(source)
     assert "from .sh2_corrected_positions" not in cleaned
-    assert "pass  # inlined internal import" in cleaned
+    assert "inlined internal import" not in cleaned
     assert "return CORRECTED_SH2_POSITIONS" in cleaned
+    assert "pass" in cleaned
     compile(cleaned, "<test>", "exec")
 
 
@@ -242,7 +246,9 @@ def test_bundle_main_window_instantiation(tmp_path):
     code_obj = compile(content, "DG_Modern_Annotator.py", "exec")
     exec(code_obj, ns)
 
-    assert ns.get("__version__") == "0.5.0"
+    import siril_modern_annotator
+
+    assert ns.get("__version__") == siril_modern_annotator.__version__
 
     bridge = MagicMock()
     bridge.get_system_catalogue_dir.return_value = tmp_path
@@ -250,7 +256,7 @@ def test_bundle_main_window_instantiation(tmp_path):
 
     window = ns["MainWindow"](bridge)
 
-    assert window.windowTitle() == "DG Modern Annotator v0.5.0"
+    assert window.windowTitle() == f"DG Modern Annotator v{siril_modern_annotator.__version__}"
     assert window.style_panel is not None
     assert window.object_panel is not None
     assert window.tools_panel is not None

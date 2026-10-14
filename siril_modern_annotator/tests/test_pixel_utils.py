@@ -1,7 +1,4 @@
-"""to_hwc_uint8 must normalize every pixel-array shape/dtype combination sirilpy could
-plausibly hand back, since RESEARCH.md #3 could not pin down get_image_pixeldata()'s
-exact channel-axis convention and dtype range from docs alone -- this was confirmed to
-matter by a real broken preview against an actual Siril image."""
+"""Tests for to_hwc_uint8 pixel array normalization across dtypes and channel positions."""
 
 from __future__ import annotations
 

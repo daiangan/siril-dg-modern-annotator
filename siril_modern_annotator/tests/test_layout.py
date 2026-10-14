@@ -1,5 +1,4 @@
-"""Collision avoidance: placed label bounding boxes should not overlap when an
-avoidable, in-bounds candidate exists (brief #35)."""
+"""Tests for label placement collision avoidance."""
 
 from __future__ import annotations
 

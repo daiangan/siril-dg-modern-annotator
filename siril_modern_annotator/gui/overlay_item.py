@@ -7,7 +7,7 @@ Same coordinate convention as annotation_item.py: native image pixel space, so n
 manual preview<->native conversion is needed here either. Geometry comes from
 annotation.renderer's compute_grid_geometry/compute_compass_geometry -- this module
 only turns that geometry into QPainter calls, mirroring export/exporter.py's Pillow
-calls off the exact same functions (ARCHITECTURE.md #8).
+calls off the exact same functions.
 """
 
 from __future__ import annotations
@@ -167,9 +167,9 @@ class ConstellationLinesItem(QGraphicsItem):
 
 
 class CompassItem(QGraphicsObject):
-    """Draggable (per user request: fixed bottom-right by default, but movable) --
-    mirrors MarkerItem's local-origin-drawing + setPos() convention from
-    annotation_item.py exactly, including the moved signal on release."""
+    """Draggable compass overlay item (bottom-right by default, user-movable).
+    Mirrors MarkerItem's local-origin-drawing + setPos() convention,
+    including the moved signal on release."""
 
     moved = pyqtSignal(float, float)
     context_menu_requested = pyqtSignal(QPoint)  # screen position to pop the menu at
@@ -319,7 +319,7 @@ class InfoBoxItem(QGraphicsObject):
     def mousePressEvent(self, event):
         # See CompassItem.mousePressEvent -- same bug, same fix.
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()  # per user request: jump straight to editing its text
+            self.clicked.emit()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             super().mousePressEvent(event)
         else:

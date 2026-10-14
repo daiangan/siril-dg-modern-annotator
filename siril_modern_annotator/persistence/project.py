@@ -1,4 +1,4 @@
-"""Annotation layout / project file persistence (brief #27).
+"""Annotation layout and project file persistence.
 
 Saves *only* annotation/layout/style/export state to a `<image>.annotations.json`
 sidecar — never pixel data. A schema_version field is included from day one so future
@@ -50,6 +50,7 @@ class ExportSettings:
     custom_height: int | None = None
     jpeg_quality: int = 92
     dpi: int = 300
+    stretch_mode: str = "preview"  # preview | linear
 
 
 @dataclass
@@ -62,9 +63,7 @@ class ProjectData:
     annotations: list[Annotation]
     export_settings: ExportSettings
     schema_version: int = SCHEMA_VERSION
-    # Grid/compass start off every fresh session (per user request) and are only ever
-    # persisted per-image, in this same sidecar -- default_factory so an older saved
-    # file (from before this field existed) still loads fine, per load()'s .get() below.
+    # Overlay settings persisted per-image in sidecar; default_factory ensures backward compatibility.
     overlay_settings: OverlaySettings = field(default_factory=OverlaySettings)
 
 
@@ -171,7 +170,9 @@ def load(path: Path) -> ProjectData:
     )
     global_style = style_preset_from_dict(payload["global_style"])
     annotations = [annotation_from_dict(a) for a in payload["annotations"]]
-    export_settings = ExportSettings(**payload["export_settings"])
+    raw_export = payload.get("export_settings", {})
+    valid_keys = ExportSettings.__dataclass_fields__.keys()
+    export_settings = ExportSettings(**{k: v for k, v in raw_export.items() if k in valid_keys})
     # A project file saved before overlay_settings existed simply has no key for it --
     # ProjectData's own default_factory=OverlaySettings (both start disabled) covers
     # that case rather than raising a KeyError.

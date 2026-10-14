@@ -1027,6 +1027,32 @@ def test_vizier_provider_shape_enrichment_failure_does_not_break_the_base_fetch(
     assert results[0].galaxy_major_axis_arcmin is None
 
 
+def test_vizier_provider_single_catalog_failure_does_not_abort_other_catalogs(monkeypatch):
+    """Failure querying one catalog must not prevent querying remaining catalogs."""
+    v50_table = _v50_table([["1", "21Alp And", "358", "", "", "00 08 23.3", "+29 05 26", "2.06", "-0.11", "B9p", "*"]])
+
+    class _FakeVizier:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query_region(self, *args, **kwargs):
+            catalog = kwargs.get("catalog")
+            if catalog == "VII/272":
+                raise TimeoutError("simulated timeout on SNR")
+            if catalog == "V/50":
+                return [v50_table]
+            return []
+
+    monkeypatch.setattr("astroquery.vizier.Vizier", _FakeVizier)
+    monkeypatch.setattr(catalogs_module, "_vizier_available", True)
+
+    wcs = _wcs_at(2.09, 29.09)
+    provider = VizierProvider()
+    results = provider.query(wcs, {"snr", "bright_star"})
+    assert any(a.catalog == "bright_star" for a in results)
+    assert catalogs_module._vizier_available is True
+
+
 # --- _run_with_hard_timeout ------------------------------------------------------------
 # Regression tests for a real, two-part bug found while building and verifying this
 # timeout: (1) astroquery's own `timeout=` setting on Vizier did not reliably bound a

@@ -1,17 +1,8 @@
-"""Normalizes raw pixel arrays from sirilpy into a predictable HxWx3 uint8 RGB array.
+"""Normalizes pixel arrays from sirilpy into a contiguous HxWx3 uint8 RGB array.
 
-Why this exists: RESEARCH.md #3 flagged a real, confirmed axis-order discrepancy between
-two different sirilpy accessors -- SirilInterface.get_image_shape() returns
-(channels, height, width), while FFit.data.shape uses (height, width, channels) -- and
-we could not find documentation pinning down which convention
-get_image_pixeldata()'s *return array* itself follows in every case, nor its exact dtype
-range for `preview=True` versus raw data. A real test against an actual plate-solved
-Siril image showed the preview rendering incorrectly, consistent with this ambiguity.
-Rather than hard-code an assumption, this module detects channel position from the
-array's own shape (the channel axis is whichever axis has size <= 4, since real image
-dimensions are essentially never that small) and normalizes dtype defensively, so both
-the GUI preview and the full-resolution exporter go through one tested code path instead
-of two independent, unverified assumptions.
+Handles channels-first versus channels-last formats, mono or RGB, and converts
+floating-point or 16-bit integer pixel data to standard uint8 RGB for display
+and export.
 """
 
 from __future__ import annotations

@@ -84,14 +84,10 @@ class DarkDoubleSpinBox(QDoubleSpinBox):
 
 
 class LabeledSlider(QWidget):
-    """A horizontal slider paired with a live value label -- used for the Ellipse
-    marker's Radius X / Radius Y / Rotation controls (per user report: clicking a
-    spinbox's tiny increment arrows repeatedly to visually fit an oval around a real
-    galaxy was uncomfortable; dragging a slider is the natural interaction for "adjust
-    this until it looks right").
+    """A horizontal slider paired with a live value label.
 
     Exposes the same value()/setValue()/setRange()/valueChanged surface as
-    DarkDoubleSpinBox so StyleEditorWidget's existing load()/marker_style()/
+    DarkDoubleSpinBox for drop-in styling controls.
     _connect_signals() code (which was written against that surface) needed no special
     casing to use this instead -- see _connect_signals()'s generic
     getattr(w, "valueChanged", None) widget-signal detection.

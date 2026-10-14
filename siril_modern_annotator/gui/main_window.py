@@ -1,9 +1,8 @@
-"""Main application window (brief #4 layout, #41 MVP feature set).
+"""Main application window.
 
-Owns: the annotation list, the active global StylePreset, the undo stack, and every
-signal wire-up between image_view / object_panel / style_panel / the graphics items.
-This is the only module allowed to call SirilBridge methods (aside from the entry
-point), and it only ever does so on the main thread.
+Owns: the annotation list, active global StylePreset, undo stack, and signal
+connections between image_view, object_panel, style_panel, and overlay items.
+Interacts with SirilBridge on the main GUI thread.
 """
 
 from __future__ import annotations
@@ -123,21 +122,12 @@ class CheckableMenu(QMenu):
 # first-time/offline user with no explanation.
 #
 # "user_dso" (Siril's own Astrometry > Annotate > Search Object list) is a second,
-# different kind of exception: whether it should default on isn't a static fact like
-# ONLINE_ONLY_CATALOGS, it depends on how many entries this particular installation's
-# catalogue already has (per user request: on while it's still a short, deliberately
-# curated list, off once it's grown past that). Excluded here and added back
-# conditionally in MainWindow.__init__, which is the earliest point a live bridge
-# connection (needed to read the count) is available.
+# Conditionally include user_dso in defaults if catalogue entry count is small.
 _DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS) - ONLINE_ONLY_CATALOGS - {"user_dso"}
 _USER_DSO_DEFAULT_ON_MAX_ENTRIES = 10
 
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA"
 
-# Shown in the window title (with __version__ appended) so the user always knows which
-# build they're running -- per user request. Also fixes a stale rename: every other
-# user-facing surface (the Siril log banner, the built script's filename) already says
-# "DG Modern Annotator", but this window title was missed when that rename happened.
 APP_TITLE = "DG Modern Annotator"
 
 
@@ -177,15 +167,9 @@ class MainWindow(QMainWindow):
             self.active_catalogs = set(_DEFAULT_CATALOGS)
             if self._user_dso_catalog_should_default_on():
                 self.active_catalogs.add("user_dso")
-        # Per-catalog marker/connector color (brief #13-adjacent request). A single
-        # dict, mutated in place (never reassigned wholesale) on every edit -- every
-        # MarkerItem/ConnectorItem is handed this exact same object at construction, so
-        # a color change is visible to all of them on their next repaint with no need
-        # to walk the scene reassigning references, the way global_style has to.
-        # Start from the shipped defaults, then overlay whatever was saved -- so a
-        # catalog the user never touched (or one added in a later version, after their
-        # last save) still gets a sensible default color instead of silently falling
-        # back to the plain global marker/connector color forever.
+        # Per-catalog marker/connector color mappings. Mutated in place on edits
+        # so all child graphics items receive the updated colors on next repaint.
+        # Defaults overlay saved values, preserving default colors for new catalogs.
         self.catalog_colors: dict[str, str] = dict(DEFAULT_CATALOG_COLORS)
         saved_catalog_colors = last_used_store.load_last_used_catalog_colors()
         if saved_catalog_colors is not None:
@@ -219,11 +203,7 @@ class MainWindow(QMainWindow):
         self._pending_item_cleanup: list[list[object]] = []
         self.selected_id: str | None = None
 
-        # Placeholder only -- _load_current_image() immediately replaces this with
-        # presets.default_overlay_settings_for_image() (resolution-scaled sizing) plus
-        # last_used_store.apply_last_used_overlay_settings() (restored on/off state and
-        # non-size-dependent style, per user request). Also persisted per-image in a
-        # saved project file (see persistence/project.py).
+        # Initial placeholder overlay settings, populated on image load.
         self.overlay_settings = OverlaySettings()
         self.grid_item: GridItem | None = None
         self.compass_item: CompassItem | None = None
@@ -236,6 +216,8 @@ class MainWindow(QMainWindow):
         self._catalog_worker: CatalogFetchWorker | None = None
         self._star_identify_worker: StarIdentifyWorker | None = None
         self._export_worker: ExportWorker | None = None
+        self._active_workers: list[QThread] = []
+        self._catalog_fetch_generation: int = 0
         self._progress_dialog: QProgressDialog | None = None
 
         self._build_ui()
@@ -324,42 +306,24 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(zoom_100_btn)
         toolbar.addSeparator()
 
-        # brief #19-20: preview stretch control. We always defaulted to Siril's own
-        # preview=True autostretch with no way to turn it off -- a real gap, since that
-        # autostretch may not be what the user wants or expects to see. "Auto Stretch"
-        # uses Siril's own get_image_pixeldata(preview=True); "Linear" uses the raw
-        # (non-preview) pixel data through our own simple linear normalization
-        # (annotation.pixel_utils), i.e. no stretch curve applied at all.
+        # Preview stretch mode control: Auto Stretch (preview=True autostretched
+        # pixel data from Siril) vs Linear (un-stretched pixel data).
         toolbar.addWidget(QLabel("Preview:"))
         self.preview_mode_combo = QComboBox()
         self.preview_mode_combo.addItem("Linear", "linear")
         self.preview_mode_combo.addItem("Auto Stretch", "auto")
-        # Deliberately not part of last-used persistence (unlike catalogs/style below):
-        # this is a one-off viewing choice for comparing against Siril's own preview,
-        # not a general preference the user wants to carry into their next session --
-        # always starts at the "Linear" default.
+        saved_preview_mode = last_used_store.load_last_used_preview_mode()
+        if saved_preview_mode:
+            idx = self.preview_mode_combo.findData(saved_preview_mode)
+            if idx >= 0:
+                self.preview_mode_combo.setCurrentIndex(idx)
         self.preview_mode_combo.currentIndexChanged.connect(self._on_preview_mode_changed)
         toolbar.addWidget(self.preview_mode_combo)
         toolbar.addSeparator()
 
-        # brief #13: catalog toggle UI, matching Siril's own catalog picker (checkboxes
-        # per catalog). This never existed before -- the active catalog set was a
-        # hardcoded constant with no way to change it from the GUI at all. Uses
-        # QToolButton (InstantPopup) rather than QPushButton.setMenu(), which rendered
-        # its dropdown arrow visibly misaligned from the button text with our dark
-        # stylesheet (confirmed by a real screenshot) -- QToolButton's menu-indicator is
-        # a standard, separately styleable sub-control instead. The menu itself is a
-        # CheckableMenu so toggling several catalogs doesn't require reopening the menu
-        # after every single click (confirmed as real friction: default QMenu behavior
-        # closes on every action activation).
+        # Catalog toggle UI allowing individual catalogs to be enabled/disabled.
+        # Uses QToolButton with instant popup menu to allow multi-selection.
         catalogs_btn = QToolButton()
-        # A plain unicode arrow appended to the text, with the native menu-indicator
-        # disabled in the stylesheet, rather than relying on QToolButton's built-in
-        # indicator subcontrol -- a real screenshot showed that indicator rendering
-        # directly on top of the button text with our stylesheet (Windows' native
-        # style interacts with subcontrol-position/-origin QSS inconsistently), and a
-        # character in the text itself can't overlap anything since it's laid out as
-        # part of the normal text flow.
         catalogs_btn.setText("Catalogs ▾")
         catalogs_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         catalogs_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
@@ -375,10 +339,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(catalogs_btn)
         toolbar.addSeparator()
 
-        # RA/Dec grid + compass: off by default, quick on/off here (brief: "should be
-        # turned off by default and then displayed if the user wants") -- style/color
-        # customization lives in the Style panel's Overlays tab, same "quick toggle
-        # here, full editing there" split as the Catalogs button above.
+        # RA/Dec grid, compass, and overlay quick toggles
         overlays_btn = QToolButton()
         overlays_btn.setText("Overlays ▾")
         overlays_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -404,12 +365,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(overlays_btn)
         toolbar.addSeparator()
 
-        # Auto Arrange Labels / Save Layout / Load Layout moved to the "Tools" dock tab
-        # (see gui/tools_panel.py) -- per user request, to keep this toolbar simple.
-
-        # Per user request: ordered last (Export), with a
-        # distinct accent color so the primary "finish and save your work" action still
-        # stands out from the neutral gray toolbar buttons around it.
         export_btn = QPushButton("Export")
         export_btn.clicked.connect(self.open_export_dialog)
         export_btn.setStyleSheet(
@@ -483,7 +438,7 @@ class MainWindow(QMainWindow):
             # Grantecan/GTC download that has a complete, valid TAN-SIP solution but no
             # PLTSOLVD card at all) has no reason to carry that keyword. We already build
             # our own astropy.wcs.WCS straight from the header for every actual
-            # coordinate transform (ARCHITECTURE.md #4) rather than trusting Siril's
+            # coordinate transform rather than trusting Siril's
             # flag for the math, so attempt that construction regardless of
             # plate_solved and only treat it as "not solved" if the header genuinely has
             # no usable celestial WCS -- see SirilWcs.from_header_dict.
@@ -514,34 +469,18 @@ class MainWindow(QMainWindow):
             self.overlay_settings = preset_store.default_overlay_settings_for_image(
                 self.image_info.width, self.image_info.height
             )
-            # On/off state and non-size-dependent style (color, opacity, label
-            # positions, corner) DO carry over across sessions, per user request --
-            # see apply_last_used_overlay_settings's own docstring for exactly which
-            # fields that is and why the rest is deliberately excluded.
             self.overlay_settings = last_used_store.apply_last_used_overlay_settings(self.overlay_settings)
             self.overlay_settings.info_box.text = self._default_info_box_text()
             self._setup_overlay_items()
             self._sync_overlay_action_checks()
             self.style_panel.set_overlay_settings(self.overlay_settings)
-            # Prefer the actual loaded filename over the FITS OBJECT keyword -- per
-            # user request, exports should be named after "the original image name",
-            # and OBJECT is frequently blank/generic rather than reflecting the real
-            # file on disk. get_loaded_image_filename() is a best-effort call (see its
-            # own docstring) that returns None if unavailable, so this still falls back
-            # to the previous OBJECT-based behavior exactly as before when it can't.
+            # Prefer the actual loaded filename over the FITS OBJECT keyword.
             loaded_filename = self.bridge.get_loaded_image_filename()
             self.source_identifier = (
                 Path(loaded_filename).stem if loaded_filename else (self.image_info.object_name or "untitled")
             )
 
-            # Marker/label geometry is native-pixel-space (ARCHITECTURE.md #4), so a
-            # flat default size looks fine at one resolution and is nearly invisible at
-            # another -- confirmed by real-world testing. Scale the starting style to
-            # this image's actual resolution instead of using a fixed constant. Skip
-            # this when the user already has a persisted last-used style, though: most
-            # markers scale off each object's angular size at render time regardless
-            # (renderer.py's size_from_angular_size), and per user request the starting
-            # style should be "what I used last time", not a re-derived default.
+            # Scale starting style to image resolution if no saved style exists.
             if not self._has_saved_style:
                 self.global_style_holder[0] = preset_store.default_preset_for_image(
                     self.image_info.width, self.image_info.height
@@ -563,10 +502,8 @@ class MainWindow(QMainWindow):
 
     def refresh_preview_image(self, fit: bool = True) -> None:
         """Fetches pixel data per the current preview-mode selection and updates the
-        canvas's base image. Called on initial load and whenever the user switches
-        Auto Stretch <-> Linear (brief #19-20) -- annotation items are untouched
-        (image_view.set_base_image no longer clears the scene)."""
-        mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
+        canvas's base image. Called on initial load and when switching preview stretch modes."""
+        mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "linear"
         try:
             if mode == "linear":
                 pixel_data = self.bridge.get_full_pixeldata()
@@ -579,6 +516,9 @@ class MainWindow(QMainWindow):
         self._set_preview_image(pixel_data, fit=fit)
 
     def _on_preview_mode_changed(self) -> None:
+        mode = self.preview_mode_combo.currentData()
+        if mode in ("auto", "linear"):
+            last_used_store.save_last_used_preview_mode(mode)
         if self.image_info is not None:
             self.refresh_preview_image(fit=False)
 
@@ -666,20 +606,33 @@ class MainWindow(QMainWindow):
             return False
         return count <= _USER_DSO_DEFAULT_ON_MAX_ENTRIES
 
+    def _track_worker(self, worker: QThread) -> None:
+        self._active_workers.append(worker)
+        worker.finished.connect(lambda: self._on_worker_finished(worker))
+
+    def _on_worker_finished(self, worker: QThread) -> None:
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
+
     def _start_catalog_fetch(self, catalogs: set[str]) -> None:
         if self.wcs is None:
             return
-        # Per user request: this table sits empty with no explanation while the
-        # (already background-threaded, non-blocking) initial catalog query runs --
-        # object_panel.set_annotations turns this back off once real results arrive.
         self.object_panel.set_loading(True)
-        self._catalog_worker = CatalogFetchWorker(self._catalog_provider(), self.wcs, catalogs, mag_limit=None)
-        self._catalog_worker.progress.connect(lambda msg: self.connection_label.setText(msg))
-        self._catalog_worker.succeeded.connect(self._on_catalog_results)
-        self._catalog_worker.failed.connect(self._on_catalog_failed)
-        self._catalog_worker.start()
+        self._catalog_fetch_generation += 1
+        gen = self._catalog_fetch_generation
+        worker = CatalogFetchWorker(
+            self._catalog_provider(), self.wcs, catalogs, mag_limit=None, parent=self
+        )
+        self._catalog_worker = worker
+        self._track_worker(worker)
+        worker.progress.connect(lambda msg: self.connection_label.setText(msg))
+        worker.succeeded.connect(lambda results, g=gen: self._on_catalog_results(results, g))
+        worker.failed.connect(lambda msg, g=gen: self._on_catalog_failed(msg, g))
+        worker.start()
 
-    def _on_catalog_results(self, annotations: list[Annotation]) -> None:
+    def _on_catalog_results(self, annotations: list[Annotation], generation: int | None = None) -> None:
+        if generation is not None and generation != self._catalog_fetch_generation:
+            return
         self.annotations = annotations
         auto_arrange(
             self.annotations, self.global_style_holder[0],
@@ -702,11 +655,6 @@ class MainWindow(QMainWindow):
         last_used_store.save_last_used_catalogs(self.active_catalogs)
 
     def _on_catalog_color_changed(self, catalog: str, color: str) -> None:
-        # Mutates catalog_colors in place (not a reassignment) -- every MarkerItem/
-        # LabelItem/ConnectorItem was handed this exact dict at construction (see
-        # _add_scene_items_for), so they all pick up the new color on their next
-        # repaint without needing a full _refresh_all-style walk to reassign a
-        # reference, the way global_style changes do.
         self.catalog_colors[catalog] = color
         last_used_store.save_last_used_catalog_colors(self.catalog_colors)
         for ann in self.annotations:
@@ -718,8 +666,6 @@ class MainWindow(QMainWindow):
                 marker.update()
             label = self.label_items.get(ann.id)
             if label is not None:
-                # Only repaints -- background color doesn't affect the label's box
-                # size (font metrics/padding do), so no prepareGeometryChange needed.
                 label.update()
             self._update_connector(ann)
         self.image_view.scene_.update()
@@ -727,14 +673,25 @@ class MainWindow(QMainWindow):
     def _fetch_additional_catalog(self, catalog: str) -> None:
         if self.wcs is None:
             return
-        worker = CatalogFetchWorker(self._catalog_provider(), self.wcs, {catalog}, mag_limit=None)
+        self._catalog_fetch_generation += 1
+        gen = self._catalog_fetch_generation
+        worker = CatalogFetchWorker(
+            self._catalog_provider(), self.wcs, {catalog}, mag_limit=None, parent=self
+        )
+        self._catalog_worker = worker
+        self._track_worker(worker)
         worker.progress.connect(lambda msg: self.connection_label.setText(msg))
-        worker.succeeded.connect(lambda results, cat=catalog: self._on_additional_catalog_results(cat, results))
-        worker.failed.connect(self._on_catalog_failed)
-        self._catalog_worker = worker  # keep a reference so it isn't garbage-collected mid-flight
+        worker.succeeded.connect(
+            lambda results, cat=catalog, g=gen: self._on_additional_catalog_results(cat, results, g)
+        )
+        worker.failed.connect(lambda msg, g=gen: self._on_catalog_failed(msg, g))
         worker.start()
 
-    def _on_additional_catalog_results(self, catalog: str, results: list[Annotation]) -> None:
+    def _on_additional_catalog_results(
+        self, catalog: str, results: list[Annotation], generation: int | None = None
+    ) -> None:
+        if "active_catalogs" in self.__dict__ and catalog not in self.active_catalogs:
+            return
         # De-dupe against what's already loaded (angular proximity, same rule as
         # CompositeProvider) so re-enabling a catalog doesn't duplicate objects another
         # already-active catalog also happens to carry (e.g. Messier + NGC overlap).
@@ -802,11 +759,10 @@ class MainWindow(QMainWindow):
         self.object_panel.set_annotations(self.annotations)
         self.connection_label.setText(f"{len(self.annotations)} objects — {self.source_identifier}")
 
-    def _on_catalog_failed(self, message: str) -> None:
+    def _on_catalog_failed(self, message: str, generation: int | None = None) -> None:
+        if generation is not None and generation != self._catalog_fetch_generation:
+            return
         logger.error("Catalog fetch failed: %s", message)
-        # Harmless no-op if this wasn't the initial fetch (the table was already
-        # showing) -- covers the case where the initial query itself fails, which
-        # otherwise leaves the "Loading objects..." placeholder stuck forever.
         self.object_panel.set_loading(False)
         QMessageBox.warning(
             self, "Catalog Query Failed",
@@ -1265,7 +1221,7 @@ class MainWindow(QMainWindow):
         # ra/dec (not just image_x/image_y) are needed even for a manually-placed
         # object -- the RA/Dec grid, the info box, and the Objects panel's RA/Dec
         # display all read straight off the annotation, same as any catalog object
-        # (ARCHITECTURE.md #4's "ra/dec are the permanent source of truth").
+        # (ra/dec are the permanent source of truth).
         ra, dec = self.wcs.pixel_to_world(x, y)
         # A custom object has no catalog angular_size, so it never benefits from
         # compute_marker_geometry's angular-size-based upscaling (renderer.py) the way
@@ -1327,11 +1283,12 @@ class MainWindow(QMainWindow):
             return
         ra, dec = self.wcs.pixel_to_world(x, y)
         radius_arcsec = default_radius_arcsec(self.arcsec_per_px)
-        worker = StarIdentifyWorker(ra, dec, radius_arcsec)
+        worker = StarIdentifyWorker(ra, dec, radius_arcsec, parent=self)
+        self._star_identify_worker = worker
+        self._track_worker(worker)
         worker.progress.connect(lambda msg: self.connection_label.setText(msg))
         worker.succeeded.connect(lambda candidates, pos=screen_pos: self._on_star_identify_results(candidates, pos))
         worker.failed.connect(self._on_star_identify_failed)
-        self._star_identify_worker = worker
         worker.start()
 
     def _on_star_identify_results(self, candidates: list[StarCandidate], screen_pos) -> None:
@@ -1366,7 +1323,7 @@ class MainWindow(QMainWindow):
         # candidate.ra/dec (resolved by SIMBAD) is authoritative here, not the original
         # click position -- the click was only the search center, same "ra/dec is the
         # permanent source of truth" contract every other catalog object already
-        # follows (ARCHITECTURE.md #4). Unlike _add_custom_object (where the click
+        # follows. Unlike _add_custom_object (where the click
         # itself has no other position to snap to), getting this backwards would leave
         # the marker sitting at the click instead of the star's real position.
         image_x, image_y = self.wcs.world_to_pixel(candidate.ra, candidate.dec)
@@ -1522,11 +1479,7 @@ class MainWindow(QMainWindow):
         # run_auto_arrange() pushes its own command, which becomes a child of this
         # macro since it's still open when that runs.
         #
-        # Custom objects (catalog == "user") are skipped here -- per user request.
-        # They have no independent catalog/WCS position to reset *to*: wherever the
-        # user placed one *is* its position, same as image_x/image_y itself is just
-        # wherever they right-clicked when creating it (see _add_custom_object), not
-        # a verified astrometric source position the way a real catalog object's is.
+        # Custom objects (catalog == "user") have no catalog position to reset to.
         if not self.annotations:
             return
         self.undo_stack.beginMacro("Reset Layout")
@@ -1764,11 +1717,13 @@ class MainWindow(QMainWindow):
     def open_export_dialog(self) -> None:
         if self.image_info is None:
             return
-        # Per user request: remember export settings (format, resolution mode, quality,
-        # DPI) across sessions -- these don't depend on any one image the way overlay
-        # sizing does, so unlike default_overlay_settings_for_image there's no
-        # resolution-based recompute to defeat by restoring them verbatim.
         initial = last_used_store.load_last_used_export_settings()
+        current_preview_mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "linear"
+        default_stretch = "linear" if current_preview_mode == "linear" else "preview"
+        if initial is None:
+            initial = ExportSettings(stretch_mode=default_stretch)
+        else:
+            initial.stretch_mode = default_stretch
         dialog = ExportDialog(self.image_info.width, self.image_info.height, self, initial=initial)
         if dialog.exec():
             settings = dialog.export_settings()
@@ -1781,9 +1736,12 @@ class MainWindow(QMainWindow):
         if not path_str:
             return
         try:
-            pixel_data = self.bridge.get_full_pixeldata()
+            if settings.stretch_mode == "preview":
+                pixel_data = self.bridge.get_preview_pixeldata()
+            else:
+                pixel_data = self.bridge.get_full_pixeldata()
         except Exception as exc:
-            QMessageBox.critical(self, "Export Failed", f"Could not read full-resolution image data:\n{exc}")
+            QMessageBox.critical(self, "Export Failed", f"Could not read image data:\n{exc}")
             return
 
         self._progress_dialog = QProgressDialog("Exporting…", None, 0, 0, self)
@@ -1793,10 +1751,12 @@ class MainWindow(QMainWindow):
         self._export_worker = ExportWorker(
             Path(path_str), pixel_data, self.annotations, self.global_style_holder[0],
             settings, self.arcsec_per_px, self.icc_profile,
+            parent=self,
             catalog_colors=self.catalog_colors,
             wcs=self.wcs, overlay_settings=self.overlay_settings,
             constellation_lines=self._constellation_lines, constellation_names=self._constellation_names,
         )
+        self._track_worker(self._export_worker)
         self._export_worker.progress.connect(self._progress_dialog.setLabelText)
         self._export_worker.succeeded.connect(self._on_export_succeeded)
         self._export_worker.failed.connect(self._on_export_failed)
@@ -1882,6 +1842,20 @@ class MainWindow(QMainWindow):
         self.style_panel.set_overlay_settings(self.overlay_settings)
 
     def closeEvent(self, event) -> None:
+        for worker in list(self._active_workers):
+            try:
+                worker.blockSignals(True)
+                worker.requestInterruption()
+                worker.quit()
+            except Exception:
+                pass
+        for worker in list(self._active_workers):
+            try:
+                worker.wait(1000)
+            except Exception:
+                pass
+        self._active_workers.clear()
+
         try:
             self.bridge.disconnect()
         except Exception:

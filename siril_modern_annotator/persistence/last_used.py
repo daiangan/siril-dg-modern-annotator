@@ -28,6 +28,7 @@ _CATALOGS_KEY = "last_used/active_catalogs"
 _CATALOG_COLORS_KEY = "last_used/catalog_colors"
 _OVERLAY_KEY = "last_used/overlay_settings"
 _EXPORT_KEY = "last_used/export_settings"
+_PREVIEW_MODE_KEY = "last_used/preview_mode"
 
 
 def _settings() -> QSettings:
@@ -89,20 +90,29 @@ def load_last_used_export_settings() -> ExportSettings | None:
     if not raw:
         return None
     try:
-        return ExportSettings(**json.loads(raw))
+        data = json.loads(raw)
+        valid_keys = ExportSettings.__dataclass_fields__.keys()
+        return ExportSettings(**{k: v for k, v in data.items() if k in valid_keys})
     except Exception:
         logger.exception("Failed to parse saved last-used export settings; ignoring them")
         return None
 
 
-# Only the fields below are saved for overlays -- per user request, "settings that do
-# not depend on image size" (on/off, color, opacity, label positions, corner). Left out
-# on purpose: line_width/label_font_size/padding/border_radius/margin (resolution-scaled
-# fresh for each image by presets.default_overlay_settings_for_image -- restoring a flat
-# saved value would defeat that scaling and look wrong on a different-sized image next
-# time), info_box.text (per-image FITS-header content, not a style choice), and
-# anchor_x/anchor_y (a raw native-pixel-space drag position, meaningless on a
-# different-sized image).
+def save_last_used_preview_mode(mode: str) -> None:
+    if mode in ("auto", "linear"):
+        _settings().setValue(_PREVIEW_MODE_KEY, mode)
+
+
+def load_last_used_preview_mode() -> str | None:
+    raw = _settings().value(_PREVIEW_MODE_KEY, None)
+    if raw in ("auto", "linear"):
+        return str(raw)
+    return None
+
+
+# Only size-independent settings are saved across sessions (on/off, color, opacity,
+# label positions, corner). Size-dependent geometry (line width, font size, margins)
+# is dynamically resolution-scaled for each loaded image.
 
 
 def save_last_used_overlay_settings(settings: OverlaySettings) -> None:

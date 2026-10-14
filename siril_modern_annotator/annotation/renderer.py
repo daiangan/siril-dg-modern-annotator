@@ -4,7 +4,7 @@ This module computes *where* things go (label bounding box, connector line point
 never draws anything itself — no Qt, no Pillow. gui/annotation_item.py (QPainter) and
 export/exporter.py (Pillow ImageDraw) both call these same functions before drawing, so
 interactive preview and full-resolution export are guaranteed to place markers, labels,
-and connectors identically (ARCHITECTURE.md #8) — only the pixel-drawing backend and the
+and connectors identically — only the pixel-drawing backend and the
 scale factor differ.
 """
 
@@ -36,8 +36,8 @@ from .models import (
 )
 from .wcs import SirilWcs
 
-# Below this marker-to-label-center distance, the label is considered "attached" and no
-# connector line is drawn (brief #10's connector is only for labels moved away).
+# Below this marker-to-label-center distance, the label is considered attached and no
+# connector line is drawn.
 _ATTACHED_THRESHOLD_PX = 4.0
 
 # Default fraction of the smaller image dimension used as a sane cap on angular-size-
@@ -155,7 +155,7 @@ def compute_marker_geometry(
     # angular-size auto-scaling entirely rather than applying it to a field
     # (radius_x/radius_y) style.size_from_angular_size doesn't even describe.
     if style.shape is not MarkerShape.ELLIPSE and style.size_from_angular_size and ann.angular_size and arcsec_per_px:
-        # angular_size is in arcmin (RESEARCH.md local-catalog schema); convert to px.
+        # angular_size is in arcminutes; convert to pixels.
         angular_radius_arcsec = (ann.angular_size * 60.0) / 2.0
         radius = max(radius, angular_radius_arcsec / arcsec_per_px)
         if max_radius_px is not None:
@@ -456,9 +456,7 @@ def _format_ra_sexagesimal(ra_deg: float) -> str:
 
 
 def _format_dec_sexagesimal(dec_deg: float) -> str:
-    """Matches _format_ra_sexagesimal's minutes-only precision. Plain apostrophe for
-    arcminutes ("+41°30'"), not the typographic prime (′) the RA formatter's seconds
-    variant used to pair with -- simpler, per user request/example."""
+    """Matches _format_ra_sexagesimal's minutes-only precision ("+41°30'")."""
     sign = "-" if dec_deg < 0 else "+"
     dec_deg = abs(dec_deg)
     d = int(dec_deg)
@@ -531,9 +529,7 @@ def _clip_polyline_to_frame(
 
 
 _GRID_LABEL_MARGIN_PX = 6.0
-# How close a label's near edge should sit to its grid line -- per user request,
-# noticeably closer than dead-centered-on-the-line (the previous behavior), matching
-# Siril's own look of text running right along each line.
+# Spacing between label edge and grid line.
 GRID_LABEL_LINE_GAP_PX = 2.0
 
 
@@ -644,9 +640,8 @@ def place_grid_label_point(
     frame_width: float, frame_height: float,
     gap: float = GRID_LABEL_LINE_GAP_PX, margin: float = _GRID_LABEL_MARGIN_PX,
 ) -> Point:
-    """Where a grid label's text should actually be centered when drawn: close to its
-    line -- GRID_LABEL_LINE_GAP_PX from it, not dead-centered on it (per user request)
-    -- while never overhanging the frame.
+    """Computes the center point for drawing a grid label adjacent to its line while
+    ensuring it remains within the image frame.
 
     (x, y) is a real point *on* the line. This first nudges perpendicular to the line
     by grid_label_perpendicular_offset (same distance for every label, since it only
@@ -690,8 +685,8 @@ def place_grid_label_point(
 def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
     """RA/Dec coordinate grid, clipped to the image frame. Native image pixel space,
     same as every other geometry function here. wcs is the only thing this needs from
-    the caller -- all the actual sky<->pixel math is SirilWcs's (ARCHITECTURE.md #4;
-    this just calls its existing public methods, the same way CatalogFetchWorker does)."""
+    the caller -- all the actual sky<->pixel math is SirilWcs's
+    (this just calls its existing public methods, the same way CatalogFetchWorker does)."""
     if not style.enabled:
         return GridGeometry(lines=[], labels=[], style=style)
 
@@ -753,7 +748,7 @@ def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
 # ------------------------------------------------------------------ compass ----
 
 _COMPASS_ANGULAR_DELTA_DEG = 0.01
-_COMPASS_DEFAULT_ANCHOR_FRACTION = 0.92  # bottom-right, per user request
+_COMPASS_DEFAULT_ANCHOR_FRACTION = 0.92  # bottom-right anchor default
 
 
 @dataclass(frozen=True)

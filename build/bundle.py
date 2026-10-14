@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Builds a single-file distributable script for the official siril-scripts repository.
 
-Per RESEARCH.md #5 / ARCHITECTURE.md #2: "Scripts should be single-file scripts" is a
-hard submission requirement for gitlab.com/free-astro/siril-scripts. We develop as a
-modular package (siril_modern_annotator/) for testability and maintainability, and
-this build script compiles and inlines it into a clean, standard, top-to-bottom single
-.py file at build time.
+Inlines the modular package (siril_modern_annotator/) into a clean, standard,
+top-to-bottom single Python script for submission to gitlab.com/free-astro/siril-scripts.
 
 Architecture of the inlined bundle:
 - No dynamic loaders, no sys.meta_path, no _MODULE_SOURCES dictionary, and no exec().
@@ -158,15 +155,11 @@ warnings.filterwarnings(
     category=RuntimeWarning,
 )
 
-# Linux platform compatibility: force xcb on Linux (matching upstream Siril scripts)
-if platform.system().lower() == "linux":
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-
 try:
     import sirilpy as s
     s.ensure_installed(
         "PyQt6", "astropy", "astroquery", "Pillow", "tifffile",
-        version_constraints=[">=6.4", ">=5.3", ">=0.4", ">=10.0", ">=2021.7"],
+        version_constraints=[">=6.4", ">=5.3", ">=0.4.8", ">=10.1", ">=2021.7"],
     )
 except ImportError:
     pass
@@ -359,9 +352,13 @@ def _clean_module(source: str) -> tuple[str, str]:
         doc_lines.update(range(doc_node.lineno, doc_node.end_lineno + 1))
 
     top_import_lines = set()
+    redundant_top_lines = set()
     for stmt in tree.body:
         if isinstance(stmt, (ast.Import, ast.ImportFrom)):
             top_import_lines.update(range(stmt.lineno, stmt.end_lineno + 1))
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            if isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr in ("basicConfig", "filterwarnings"):
+                redundant_top_lines.update(range(stmt.lineno, stmt.end_lineno + 1))
 
     nested_internal_imports: list[ast.ImportFrom] = []
     for node in ast.walk(tree):
@@ -371,19 +368,29 @@ def _clean_module(source: str) -> tuple[str, str]:
             if node.lineno not in top_import_lines:
                 nested_internal_imports.append(node)
 
+    empty_body_lines = set()
+    for parent in ast.walk(tree):
+        for attr in ("body", "orelse", "finalbody"):
+            body = getattr(parent, attr, None)
+            if isinstance(body, list) and len(body) == 1 and body[0] in nested_internal_imports:
+                empty_body_lines.add(body[0].lineno)
+
     for imp in nested_internal_imports:
         indent = len(lines[imp.lineno - 1]) - len(lines[imp.lineno - 1].lstrip())
         for line_idx in range(imp.lineno, imp.end_lineno + 1):
-            if line_idx == imp.lineno:
-                lines[line_idx - 1] = " " * indent + "pass  # inlined internal import\n"
+            if line_idx == imp.lineno and line_idx in empty_body_lines:
+                lines[line_idx - 1] = " " * indent + "pass\n"
             else:
                 lines[line_idx - 1] = ""
 
     filtered_lines: list[str] = []
     for idx, line in enumerate(lines, 1):
-        if idx in doc_lines or idx in top_import_lines:
+        if idx in doc_lines or idx in top_import_lines or idx in redundant_top_lines:
             continue
         filtered_lines.append(line)
+
+    while filtered_lines and (filtered_lines[0].startswith("#!") or not filtered_lines[0].strip()):
+        filtered_lines.pop(0)
 
     cleaned_source = "".join(filtered_lines).strip()
     return docstring, cleaned_source
@@ -489,6 +496,8 @@ def build() -> Path:
                     "    load_last_used_export_settings=load_last_used_export_settings,\n"
                     "    save_last_used_overlay_settings=save_last_used_overlay_settings,\n"
                     "    apply_last_used_overlay_settings=apply_last_used_overlay_settings,\n"
+                    "    save_last_used_preview_mode=save_last_used_preview_mode,\n"
+                    "    load_last_used_preview_mode=load_last_used_preview_mode,\n"
                     ")\n\n"
                 )
 

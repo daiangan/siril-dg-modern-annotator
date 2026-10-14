@@ -176,3 +176,40 @@ def test_font_for_style_scales_size():
     finally:
         exporter_module.ImageFont = original
     assert sizes[0] == 40  # 20.0 * 2.0
+
+
+def test_font_file_candidates_linux_searches_subdirectories(monkeypatch, tmp_path):
+    sub = tmp_path / "truetype" / "msttcorefonts"
+    sub.mkdir(parents=True)
+    font_file = sub / "Verdana.ttf"
+    font_file.write_bytes(b"dummy")
+
+    monkeypatch.setattr(exporter.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(exporter, "_LINUX_FONTS_DIRS", [tmp_path])
+    exporter._linux_font_index = None
+
+    candidates = exporter._font_file_candidates("Verdana")
+    assert font_file in candidates
+
+
+def test_font_for_style_falls_back_to_dejavu_on_linux_when_verdana_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(exporter.platform, "system", lambda: "Linux")
+    sub = tmp_path / "truetype" / "dejavu"
+    sub.mkdir(parents=True)
+    dejavu_file = sub / "DejaVuSans.ttf"
+    dejavu_file.write_bytes(b"dummy")
+
+    monkeypatch.setattr(exporter, "_LINUX_FONTS_DIRS", [tmp_path])
+    exporter._linux_font_index = None
+
+    calls = []
+
+    def fake_truetype(name_or_path, size):
+        calls.append(str(name_or_path))
+        if str(name_or_path) == str(dejavu_file):
+            return "DEJAVU_FONT"
+        raise OSError("not found")
+
+    monkeypatch.setattr(exporter.ImageFont, "truetype", fake_truetype)
+    result = exporter._font_for_style(_Style("Verdana"), scale=1.0)
+    assert result == "DEJAVU_FONT"

@@ -1,7 +1,4 @@
-"""Connector line routing (brief #10): the line must start at the marker's edge facing
-the label, not at its center. A real screenshot showed the line running from dead-center
-out through the circle, which reads as visually wrong and doesn't match how Siril's own
-annotator (or any typical annotation tool) draws it."""
+"""Tests for connector line routing between markers and labels."""
 
 from __future__ import annotations
 

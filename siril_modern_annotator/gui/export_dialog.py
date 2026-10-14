@@ -1,4 +1,4 @@
-"""Export settings dialog (brief #21-23): format, resolution mode, quality, DPI."""
+"""Export settings dialog: format, stretch mode, resolution mode, quality, DPI."""
 
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ _RESOLUTION_MODES = [
     ("Custom width/height", "custom"),
 ]
 
+_STRETCH_MODES = [
+    ("As previewed (autostretched)", "preview"),
+    ("Raw linear", "linear"),
+]
+
 
 class ExportDialog(QDialog):
     def __init__(self, native_width: int, native_height: int, parent=None, initial: ExportSettings | None = None):
@@ -43,6 +48,11 @@ class ExportDialog(QDialog):
         for label, value in _FORMATS:
             self.format_combo.addItem(label, value)
         layout.addRow("Format", self.format_combo)
+
+        self.stretch_mode_combo = QComboBox()
+        for label, value in _STRETCH_MODES:
+            self.stretch_mode_combo.addItem(label, value)
+        layout.addRow("Rendering / stretch", self.stretch_mode_combo)
 
         self.resolution_mode = QComboBox()
         for label, value in _RESOLUTION_MODES:
@@ -96,6 +106,10 @@ class ExportDialog(QDialog):
             format_index = self.format_combo.findData(initial.format)
             if format_index >= 0:
                 self.format_combo.setCurrentIndex(format_index)
+            if hasattr(initial, "stretch_mode") and initial.stretch_mode:
+                stretch_index = self.stretch_mode_combo.findData(initial.stretch_mode)
+                if stretch_index >= 0:
+                    self.stretch_mode_combo.setCurrentIndex(stretch_index)
             mode_index = self.resolution_mode.findData(initial.resolution_mode)
             if mode_index >= 0:
                 self.resolution_mode.setCurrentIndex(mode_index)
@@ -120,6 +134,7 @@ class ExportDialog(QDialog):
     def export_settings(self) -> ExportSettings:
         return ExportSettings(
             format=self.format_combo.currentData(),
+            stretch_mode=self.stretch_mode_combo.currentData(),
             resolution_mode=self.resolution_mode.currentData(),
             scale_percent=float(self.scale_spin.value()),
             custom_width=self.width_spin.value() if self.resolution_mode.currentData() == "custom" else None,

@@ -1,9 +1,7 @@
-"""Interactive image canvas: QGraphicsView/QGraphicsScene with zoom/pan/fit (brief #8).
+"""Interactive image canvas: QGraphicsView/QGraphicsScene with zoom/pan/fit.
 
-This is the *only* place that converts native image pixel coordinates to preview
-(on-screen) coordinates and back, via the view's own transform — annotation items ask
-this view to do that conversion rather than computing it themselves
-(ARCHITECTURE.md #4).
+Handles coordinate conversion between native image pixel coordinates and preview
+(on-screen) coordinates via viewport transformations.
 """
 
 from __future__ import annotations

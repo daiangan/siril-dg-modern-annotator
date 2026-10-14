@@ -1,25 +1,11 @@
-"""Catalog providers.
+"""Astronomical catalog providers.
 
-Per RESEARCH.md #8: sirilpy exposes no catalog/annotation API. Object data comes from
-one of:
+Provides catalog object querying and enrichment through:
+  - LocalCsvProvider: Reads Siril's bundled CSV catalogs from disk.
+  - VizierProvider: Queries VizieR catalogs via astroquery.
+  - CompositeProvider: Merges results from multiple providers with de-duplication.
 
-  - LocalCsvProvider:  reads Siril's own bundled CSV catalogs directly, located under
-                        SirilInterface.get_siril_systemdatadir()/catalogue/. Fast,
-                        offline, but no object-type field and sparse common names
-                        outside Messier.
-  - VizierProvider:     astroquery against VizieR (VII/118 Messier/NGC/IC, VII/20
-                        Sharpless, VII/220A Barnard, V/50 bright stars) — mirrors the
-                        proven query set used by
-                        siril-scripts/utility/Svenesis-AnnotateImage.py. Primary/default
-                        source; requires network. (Previously also resolved common
-                        names via SIMBAD's TAP service; removed after real-world use
-                        showed that service, and its only mirror, too unreliable to be
-                        worth the complexity -- see VizierProvider's own docstring.)
-  - CompositeProvider: merges results from multiple providers, de-duplicating by
-                        angular proximity + name match.
-
-Every provider implements the same CatalogProvider interface so new catalogs (Caldwell,
-Abell, vdB, ...) can be added without touching GUI or rendering code (brief #13).
+All providers implement the CatalogProvider interface.
 """
 
 from __future__ import annotations
@@ -41,7 +27,11 @@ from pathlib import Path
 
 import numpy as np
 
+from .common_names import COMMON_NAMES
+from .gum_positions import GUM_OBJECTS
 from .models import Annotation, default_priority_for_catalog
+from .rcw_corrected_positions import CORRECTED_RCW_POSITIONS
+from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS
 from .wcs import SirilWcs
 
 logger = logging.getLogger(__name__)
@@ -72,11 +62,7 @@ USER_CATALOG_FILES: dict[str, str] = {
     "user_dso": "user-DSO-catalogue.csv",
 }
 
-# Every catalog we can actually query (via LocalCsvProvider and/or VizierProvider),
-# with a display label matching Siril's own catalog-picker naming (brief #13's catalog
-# toggle UI) -- deliberately does NOT include constellations/constellation names, since
-# we have no provider implementing those yet (ARCHITECTURE.md's future-feature list), and
-# a checkbox that does nothing would be misleading.
+# Supported catalog keys and their human-readable display names matching Siril's conventions.
 SUPPORTED_CATALOGS: dict[str, str] = {
     "bright_star": "Star Catalogue",
     # Siril's own persistent Astrometry > Annotate > Search Object list (see
@@ -246,9 +232,7 @@ def _safe_float(value: str) -> float | None:
 
 
 def _first_alias(alias_field: str) -> str | None:
-    """Local catalog alias columns are '/'-separated mixes of common names and
-    cross-catalog IDs (RESEARCH.md #8, B.6), e.g. 'Crab nebula/NGC1952/Sh2-244'. Take the
-    first token as a best-effort common name only if it doesn't look like a catalog ID."""
+    """Extracts the first token of an alias column as a common name if it does not resemble a catalog ID."""
     if not alias_field:
         return None
     first = alias_field.split("/")[0].strip()
@@ -291,15 +275,7 @@ def bayer_designation_to_greek(name: str) -> str:
 
 
 class LocalCsvProvider(CatalogProvider):
-    """Reads catalog CSVs directly from disk -- either Siril's bundled, read-only
-    catalogs, or (via catalog_files=USER_CATALOG_FILES) Siril's own writable per-user
-    catalogue directory (see that constant's docstring).
-
-    catalogue_dir must be the directory returned by SirilInterface.get_siril_systemdatadir()
-    or get_siril_userdatadir(), joined with "catalogue" (see RESEARCH.md #8, Option C, and
-    SirilBridge.get_system_catalogue_dir()/get_user_catalogue_dir()). This class does not
-    know about sirilpy at all — the caller resolves the path.
-    """
+    """Reads catalog CSVs directly from disk."""
 
     def __init__(self, catalogue_dir: Path, catalog_files: dict[str, str] | None = None):
         self.catalogue_dir = Path(catalogue_dir)
@@ -349,8 +325,8 @@ class LocalCsvProvider(CatalogProvider):
         if not rows:
             return []
 
-        ra = np.array([_safe_float(r.get("ra", "")) or np.nan for r in rows])
-        dec = np.array([_safe_float(r.get("dec", "")) or np.nan for r in rows])
+        ra = np.array([np.nan if (v := _safe_float(r.get("ra", ""))) is None else v for r in rows])
+        dec = np.array([np.nan if (v := _safe_float(r.get("dec", ""))) is None else v for r in rows])
         valid = ~np.isnan(ra) & ~np.isnan(dec)
         if not np.any(valid):
             return []
@@ -431,8 +407,6 @@ class Sh2CorrectedPositionProvider(CatalogProvider):
         catalogs: set[str],
         mag_limit: float | None = None,
     ) -> list[Annotation]:
-        from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS
-
         if "sh2" not in catalogs:
             return []
         margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
@@ -476,8 +450,6 @@ class RcwCorrectedPositionProvider(CatalogProvider):
         catalogs: set[str],
         mag_limit: float | None = None,
     ) -> list[Annotation]:
-        from .rcw_corrected_positions import CORRECTED_RCW_POSITIONS
-
         if "rcw" not in catalogs:
             return []
         margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
@@ -525,8 +497,6 @@ class GumProvider(CatalogProvider):
         catalogs: set[str],
         mag_limit: float | None = None,
     ) -> list[Annotation]:
-        from .gum_positions import GUM_OBJECTS
-
         if "gum" not in catalogs:
             return []
         margin_px = _QUERY_MARGIN_FRACTION * max(wcs.native_width, wcs.native_height)
@@ -551,8 +521,7 @@ class GumProvider(CatalogProvider):
         return results
 
 
-# VizieR catalog IDs mirroring siril-scripts/utility/Svenesis-AnnotateImage.py's proven
-# query set (RESEARCH.md #8, Option D).
+# VizieR catalog identifiers for online queries.
 _VIZIER_CATALOGS: dict[str, str] = {
     "messier": "VII/118",  # NGC 2000.0 -- also covers ngc/ic
     "ngc": "VII/118",
@@ -1406,12 +1375,11 @@ class VizierProvider(CatalogProvider):
                     timeout_seconds=15,
                 )
             except Exception as exc:
-                _vizier_available = False
                 logger.warning(
-                    "VizieR query failed for %s (%s); will not retry this session: %s",
+                    "VizieR query failed for %s (%s): %s",
                     vizier_id, type(exc).__name__, exc,
                 )
-                return results
+                continue
             if not table_list:
                 continue
             parsed = self._rows_to_annotations(table_list[0], vizier_id, wcs, mag_limit)
@@ -1574,14 +1542,7 @@ class CompositeProvider(CatalogProvider):
         return results
 
     def _apply_common_names(self, annotations: list[Annotation]) -> None:
-        """Backfills a popular name (e.g. "Crescent Nebula" for NGC6888) from
-        common_names.COMMON_NAMES whenever nothing upstream already set one -- see that
-        module's own docstring for the full source and data-cleaning methodology.
-        Non-clobbering, same precedent as every other cross-provider enrichment field
-        in _dedupe: a provider's own common_name (e.g. Siril's messier.csv "alias"
-        column) always wins over this lookup."""
-        from .common_names import COMMON_NAMES
-
+        """Enriches annotations with popular common names if not already set."""
         for ann in annotations:
             if ann.common_name is None:
                 ann.common_name = COMMON_NAMES.get(ann.catalog_name)

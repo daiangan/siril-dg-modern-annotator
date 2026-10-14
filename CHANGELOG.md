@@ -2,6 +2,25 @@
 
 All notable changes to Siril Modern Annotator are documented here.
 
+## [0.5.1] - 2026-10-14
+
+### Added
+- Export stretch mode selector: added option to render and export either as previewed (autostretched) or in linear data, resolving export matching preview for unstretched workflows.
+- Color profile embedding: embedded ICC color profile in 16-bit TIFF exports via `tifffile`.
+- Linux font discovery: added recursive directory font search across Linux font paths with fallback cascade (`Verdana` -> `DejaVu Sans` -> `Liberation Sans` -> `FreeSans`) for unicode Bayer Greek designations.
+
+### Changed
+- Refactored background worker thread lifecycle: parented workers to `MainWindow`, added active worker tracking, per-request catalog generation counters, and safe window `closeEvent` handling with cooperative cancellation.
+- Replaced global circuit breaker on catalog queries with per-catalog timeout handling and graceful continuation.
+- Cleaned bundler output: promoted nested internal imports to top level, stripped redundant shebangs, eliminated dummy `pass` placeholders, and pruned development narrative cross-references.
+- Raised minimum dependency versions (`astroquery>=0.4.8`, `Pillow>=10.1`) and verified Siril minimum version (`1.4.4`).
+
+### Fixed
+- Preserved SIP polynomial distortion corrections in WCS world-to-pixel coordinate transformations using `all_world2pix`.
+- Fixed coordinate parsing edge case where coordinates located at 0.0 RA/Dec were incorrectly rejected.
+- Removed forced `QT_QPA_PLATFORM=xcb` override to respect user desktop environments and native Wayland/X11 configurations.
+- Fixed FITS header integration time keyword priority ordering.
+
 ## [0.5.0] - 2026-09-14
 
 ### Added

@@ -5,8 +5,8 @@ constructs to equal *native image pixel space* (image_view.py's pixmap item is s
 to native resolution). That means marker radius / font size / stroke width — all defined
 in native pixel units, the same units export/exporter.py composites at — need no manual
 preview<->native conversion here; Qt's own view transform handles the on-screen zoom.
-This is what guarantees interactive-canvas and full-resolution-export parity
-(ARCHITECTURE.md #8).
+This is what guarantees interactive-canvas and full-resolution-export parity.
+
 
 Geometry (bounding boxes, connector routing) comes from annotation.renderer — this
 module only turns that geometry into QPainter calls.
@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..annotation.models import Annotation, MarkerShape, StylePreset
+from ..annotation.models import Annotation, BackgroundMode, MarkerShape, StylePreset
 from ..annotation.renderer import (
     compute_connector_points,
     compute_label_geometry,
@@ -364,8 +364,6 @@ class LabelItem(QGraphicsObject):
         w = geo.bbox.x1 - geo.bbox.x0
         h = geo.bbox.y1 - geo.bbox.y0
         rect = QRectF(0, 0, w, h)
-
-        from ..annotation.models import BackgroundMode
 
         if style.background_mode is not BackgroundMode.NONE:
             bg = QColor(style.background_color)

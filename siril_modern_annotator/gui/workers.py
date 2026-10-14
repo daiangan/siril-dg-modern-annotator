@@ -1,11 +1,7 @@
-"""QThread workers for anything network- or CPU-bound enough to block the GUI
-(brief #30-31; pattern taken from siril-scripts/core/Siril_Catalog_Installer.py and
-VeraLux/VeraLux_Alchemy.py — see RESEARCH.md #5).
+"""QThread workers for background asynchronous operations.
 
-Workers receive plain data in their constructors and emit plain data back via
-pyqtSignal — never a SirilBridge/SirilInterface reference, and never a QWidget touched
-from run(). This structurally enforces the main-thread-only sirilpy policy
-(ARCHITECTURE.md #10).
+Workers receive plain data in their constructors and emit results back via
+pyqtSignal, ensuring SirilBridge and GUI widgets remain isolated to the main thread.
 """
 
 from __future__ import annotations
@@ -20,6 +16,7 @@ from ..annotation.constellations import ConstellationLine, ConstellationName
 from ..annotation.models import Annotation, OverlaySettings, StylePreset
 from ..annotation.star_identify import identify_stars
 from ..annotation.wcs import SirilWcs
+from ..export.exporter import export_image
 from ..persistence.project import ExportSettings
 
 
@@ -44,20 +41,20 @@ class CatalogFetchWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             self.progress.emit("Querying catalogs...")
             results = self._provider.query(self._wcs, self._catalogs, self._mag_limit)
+            if self.isInterruptionRequested():
+                return
             self.progress.emit(f"Found {len(results)} objects in field.")
             self.succeeded.emit(results)
-        except Exception as exc:  # noqa: BLE001 - surface any failure to the GUI, never crash silently
-            self.failed.emit(str(exc))
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
 
 
 class StarIdentifyWorker(QThread):
-    """Right-click "Identify Star" (main_window.py's _identify_star_at) -- a SIMBAD
-    coordinate lookup for a single point, same 3-signal shape as CatalogFetchWorker
-    above but answering "closest star-type object(s) to this point" rather than
-    "everything in this field for these catalogs"."""
-
     progress = pyqtSignal(str)
     succeeded = pyqtSignal(list)  # list[StarCandidate]
     failed = pyqtSignal(str)
@@ -70,11 +67,16 @@ class StarIdentifyWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             self.progress.emit("Querying SIMBAD...")
             results = identify_stars(self._ra, self._dec, self._radius_arcsec)
+            if self.isInterruptionRequested():
+                return
             self.succeeded.emit(results)
-        except Exception as exc:  # noqa: BLE001 - surface any failure to the GUI, never crash silently
-            self.failed.emit(str(exc))
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
 
 
 class ExportWorker(QThread):
@@ -113,9 +115,9 @@ class ExportWorker(QThread):
         self._constellation_names = constellation_names
 
     def run(self) -> None:
-        from ..export.exporter import export_image
-
         try:
+            if self.isInterruptionRequested():
+                return
             result = export_image(
                 self._output_path,
                 self._pixel_data,
@@ -131,6 +133,8 @@ class ExportWorker(QThread):
                 constellation_lines=self._constellation_lines,
                 constellation_names=self._constellation_names,
             )
-            self.succeeded.emit(str(result))
+            if not self.isInterruptionRequested():
+                self.succeeded.emit(str(result))
         except Exception as exc:  # noqa: BLE001
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))

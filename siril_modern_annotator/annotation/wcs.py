@@ -1,10 +1,7 @@
-"""WCS handling.
+"""WCS handling and coordinate transformations.
 
-Per RESEARCH.md #4: sirilpy has no direct get_wcs()/CRVAL/CRPIX accessor. The sanctioned
-path is to read the raw FITS header text via SirilInterface.get_image_fits_header(),
-parse it with sirilpy.utility.parse_fits_header() (which produces an astropy.wcs.WCS
--compatible dict), and build astropy.wcs.WCS ourselves. This module owns that logic and
-is the *only* place in the codebase allowed to do sky<->native-pixel math (ARCHITECTURE.md #4).
+Builds an astropy.wcs.WCS instance from FITS header metadata and handles
+all world (RA/Dec) to native pixel coordinate projections.
 """
 
 from __future__ import annotations
@@ -68,33 +65,25 @@ class SirilWcs:
 
     def world_to_pixel(self, ra: np.ndarray | float, dec: np.ndarray | float):
         """Vectorized sky -> native pixel. Returns (x, y) arrays/scalars, 0-indexed, in
-        *displayed* pixel space (see _flip_y for why)."""
-        x, y_raw = self._wcs.wcs_world2pix(np.atleast_1d(ra), np.atleast_1d(dec), 0)
+        displayed pixel space."""
+        x, y_raw = self._wcs.all_world2pix(np.atleast_1d(ra), np.atleast_1d(dec), 0, quiet=True)
         y = self._flip_y(y_raw)
         if np.isscalar(ra) or (hasattr(ra, "ndim") and getattr(ra, "ndim", 1) == 0):
             return float(x[0]), float(y[0])
         return x, y
 
     def pixel_to_world(self, x: np.ndarray | float, y: np.ndarray | float):
-        """Vectorized native pixel -> sky. x/y are in *displayed* pixel space (see
-        _flip_y). Returns (ra, dec) arrays/scalars."""
+        """Vectorized native pixel -> sky. x/y are in displayed pixel space.
+        Returns (ra, dec) arrays/scalars."""
         y_raw = self._flip_y(np.atleast_1d(y))
-        ra, dec = self._wcs.wcs_pix2world(np.atleast_1d(x), y_raw, 0)
+        ra, dec = self._wcs.all_pix2world(np.atleast_1d(x), y_raw, 0)
         if np.isscalar(x) or (hasattr(x, "ndim") and getattr(x, "ndim", 1) == 0):
             return float(ra[0]), float(dec[0])
         return ra, dec
 
     def _flip_y(self, y):
-        """astropy.wcs.WCS describes the FITS header's own pixel convention (row 0 =
-        bottom of the stored data, per FITS's bottom-up ROWORDER). The pixel data we
-        actually display has been flipped vertically to appear correctly on screen
-        (annotation.pixel_utils.correct_fits_row_order -- confirmed necessary by testing
-        against a real Siril image, and matching a real siril-scripts precedent). Every
-        annotation coordinate in this codebase is defined in *displayed* pixel space
-        (ARCHITECTURE.md #4), so this flip must happen here, once, rather than being
-        applied ad hoc by every caller -- confirmed necessary by a real bug where marker
-        positions no longer matched the (correctly reoriented) image because only the
-        pixel data had been flipped, not the coordinate math."""
+        """Flips Y coordinates vertically to match displayed image space from
+        FITS bottom-up row order."""
         return (self.native_height - 1) - y
 
     def in_bounds(self, x: np.ndarray, y: np.ndarray, margin_px: float = 0.0) -> np.ndarray:

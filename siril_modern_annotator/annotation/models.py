@@ -68,10 +68,7 @@ class LabelStyle:
     italic: bool = False
     text_color: str = "#f2f2f2"
     background_mode: BackgroundMode = BackgroundMode.TRANSLUCENT
-    # None = "match this object's catalog color" (the new default, per user request) --
-    # an explicit hex string is a deliberate override and always wins. Resolved to a
-    # concrete color in annotation.renderer.compute_label_geometry, the single place
-    # both the interactive canvas and the exporter read it from.
+    # None inherits catalog color; an explicit hex string is an override.
     background_color: str | None = None
     background_opacity: float = 0.55
     padding: float = 4.0
@@ -99,7 +96,7 @@ class GridStyle:
     unlike MarkerStyle/LabelStyle this has no per-object override concept and lives
     directly on OverlaySettings rather than StylePreset."""
 
-    enabled: bool = False  # off by default -- per user request, shown only if asked for
+    enabled: bool = False  # Disabled by default
     color: str = "#66AADD"
     opacity: float = 0.6
     line_width: float = 1.0
@@ -204,7 +201,7 @@ class StylePreset:
 class Annotation:
     """A single astronomical annotation.
 
-    Coordinate contract (see ARCHITECTURE.md #4):
+    Coordinate contract:
       - ra/dec are the permanent source of truth (sky space).
       - image_x/image_y are the object's position in *native* image pixel space,
         derived once from ra/dec via the image's WCS and never overwritten -- always
@@ -269,7 +266,7 @@ class Annotation:
     # converted to native px at render time via the image's own arcsec_per_px);
     # position_angle_screen_deg is pre-converted to on-screen rotation at enrichment
     # time (needs the image's actual WCS orientation, which compute_marker_geometry
-    # itself deliberately never touches -- see ARCHITECTURE.md #4).
+    # itself deliberately never touches).
     galaxy_major_axis_arcmin: float | None = None
     galaxy_minor_axis_arcmin: float | None = None
     galaxy_position_angle_screen_deg: float | None = None
@@ -315,7 +312,7 @@ class Annotation:
         return replace(self, **overrides)
 
 
-# Default priority ordering, per brief #11 step 5. Lower number = placed/kept first.
+# Default catalog priority ordering: lower number = placed/kept first.
 CATALOG_PRIORITY: dict[str, int] = {
     "messier": 10,
     "sh2": 15,

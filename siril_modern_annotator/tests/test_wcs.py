@@ -1,4 +1,4 @@
-"""Known RA/Dec -> expected native pixel position, and the inverse (brief #35)."""
+"""Tests for WCS coordinate transformations between RA/Dec and native pixel positions."""
 
 from __future__ import annotations
 
@@ -131,3 +131,23 @@ def test_color_image_header_with_third_axis_and_sip_distortion():
     ra, dec = wcs.pixel_to_world(x, y)
     assert ra == pytest.approx(310.0, abs=1e-3)
     assert dec == pytest.approx(41.0, abs=1e-3)
+
+
+def test_sip_distortion_is_applied_by_world_to_pixel():
+    """Verify that all_world2pix evaluates SIP distortion terms."""
+    header = _synthetic_header()
+    header.update(
+        {
+            "CTYPE1": "RA---TAN-SIP",
+            "CTYPE2": "DEC--TAN-SIP",
+            "A_ORDER": 2,
+            "A_2_0": 1e-6,
+            "B_ORDER": 2,
+            "B_0_2": 1e-6,
+        }
+    )
+    wcs = SirilWcs.from_header_dict(header, _WIDTH, _HEIGHT)
+    ra_off, dec_off = 310.5, 41.5
+    x_sip, _ = wcs.world_to_pixel(ra_off, dec_off)
+    x_no_sip, _ = wcs.astropy_wcs.wcs_world2pix([ra_off], [dec_off], 0)
+    assert abs(x_sip - x_no_sip[0]) > 0.001

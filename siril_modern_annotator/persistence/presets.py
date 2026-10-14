@@ -1,4 +1,4 @@
-"""Style presets: built-in (code-defined, brief #17) plus user-created (QSettings-backed).
+"""Style presets: built-in presets plus user-created (QSettings-backed) presets.
 
 Built-in presets are never persisted to QSettings, so a corrupted or reset settings file
 can never lose them; user presets layer on top under a separate settings group.
@@ -33,12 +33,7 @@ _USER_PRESETS_KEY = "user_style_presets"
 
 
 def _builtin_presets() -> dict[str, StylePreset]:
-    # Only the default preset ships built-in now -- the other four (Scientific,
-    # Outreach, Social Media, Print) were removed per user request after "Scientific"'s
-    # much smaller flat radius/font-size left them with a field of tiny, hard-to-read
-    # markers and no quick way back to a sane default (see reset_style_btn in
-    # style_panel.py, which now handles "go back to default" instead of relying on
-    # re-selecting a preset). Users can still build and save their own via "Save As…".
+    # Minimal Modern ships as the default built-in preset; custom presets can be created via "Save As…".
     return {
         "Minimal Modern": StylePreset(
             name="Minimal Modern",
@@ -66,7 +61,7 @@ def default_preset() -> StylePreset:
 
 
 # Marker *radius* still needs to track image resolution -- our geometry is native-pixel
-# space (ARCHITECTURE.md #4), and a flat radius looked fine at one resolution and was
+# space, and a flat radius looked fine at one resolution and was
 # nearly invisible at another (confirmed against a real 2952x1936 image). Stroke width
 # and font size, by contrast, are legibility choices, not size-of-object choices: real-
 # world testing converged on fixed, resolution-independent defaults (6px strokes, 60pt
@@ -103,23 +98,11 @@ def default_preset_for_image(width: int, height: int) -> StylePreset:
     )
 
 
-# Unlike the object-label font size above (deliberately flat -- see the comment on
-# that), grid/compass label text has no background box behind it and reads as either
-# "fine" or "invisible" depending on how it scales with the frame -- per a real
-# report, the flat 11-13pt default was unreadable on a large image. Proportional to
-# the shorter image dimension so it stays legible at "fit to window" zoom regardless
-# of native resolution, floored so a small image doesn't get illegibly tiny text either.
+# Grid/compass label text and line strokes scale with the shorter image dimension
+# to maintain legibility at fit-to-window zoom across varying native resolutions.
 _OVERLAY_LABEL_FRACTION = 0.015
 _OVERLAY_LABEL_MIN_PT = 14.0
 
-# Same problem as the label font size, for the grid's and compass's own line strokes:
-# line_width is native-pixel-space (GridItem.paint/CompassItem.paint draw directly in
-# scene/native coordinates), so a flat width that looks fine on a modest image becomes
-# a near-invisible hairline once the image's native resolution climbs into the tens of
-# megapixels -- per user report. Same fraction for both so they read as the same visual
-# weight; each floored at its own flat dataclass default so a small image doesn't get
-# an oversized line, and so the compass (originally 1.6px, vs. the grid's 1.0px) keeps
-# its slightly heavier look at low resolution too.
 _OVERLAY_LINE_WIDTH_FRACTION = 0.0008
 _GRID_LINE_WIDTH_MIN_PX = 1.0
 _COMPASS_LINE_WIDTH_MIN_PX = 1.6
@@ -158,12 +141,12 @@ def _preset_to_dict(preset: StylePreset) -> dict:
     return to_jsonable(asdict(preset))
 
 
-def _settings() -> QSettings:
+def _preset_settings() -> QSettings:
     return QSettings(ORG_NAME, APP_NAME)
 
 
 def load_user_presets() -> dict[str, StylePreset]:
-    raw = _settings().value(_USER_PRESETS_KEY, "")
+    raw = _preset_settings().value(_USER_PRESETS_KEY, "")
     if not raw:
         return {}
     try:
@@ -176,7 +159,7 @@ def load_user_presets() -> dict[str, StylePreset]:
 def save_user_preset(preset: StylePreset) -> None:
     presets = load_user_presets()
     presets[preset.name] = preset
-    _settings().setValue(
+    _preset_settings().setValue(
         _USER_PRESETS_KEY,
         json.dumps({name: _preset_to_dict(p) for name, p in presets.items()}),
     )
@@ -185,7 +168,7 @@ def save_user_preset(preset: StylePreset) -> None:
 def delete_user_preset(name: str) -> None:
     presets = load_user_presets()
     presets.pop(name, None)
-    _settings().setValue(
+    _preset_settings().setValue(
         _USER_PRESETS_KEY,
         json.dumps({n: _preset_to_dict(p) for n, p in presets.items()}),
     )
