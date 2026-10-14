@@ -20,9 +20,17 @@ def test_no_initial_uses_the_flat_hardcoded_defaults():
     dialog = ExportDialog(4000, 3000)
     settings = dialog.export_settings()
     assert settings.format == "jpeg"
+    assert settings.stretch_mode == "preview"
     assert settings.resolution_mode == "original"
     assert settings.jpeg_quality == 92
     assert settings.dpi == 300
+
+
+def test_initial_seeds_stretch_mode():
+    initial = ExportSettings(stretch_mode="linear")
+    dialog = ExportDialog(4000, 3000, initial=initial)
+    settings = dialog.export_settings()
+    assert settings.stretch_mode == "linear"
 
 
 def test_initial_seeds_format_and_simple_fields():

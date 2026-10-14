@@ -334,8 +334,8 @@ class MainWindow(QMainWindow):
         # (annotation.pixel_utils), i.e. no stretch curve applied at all.
         toolbar.addWidget(QLabel("Preview:"))
         self.preview_mode_combo = QComboBox()
-        self.preview_mode_combo.addItem("Linear", "linear")
         self.preview_mode_combo.addItem("Auto Stretch", "auto")
+        self.preview_mode_combo.addItem("Linear", "linear")
         # Deliberately not part of last-used persistence (unlike catalogs/style below):
         # this is a one-off viewing choice for comparing against Siril's own preview,
         # not a general preference the user wants to carry into their next session --
@@ -1783,11 +1783,10 @@ class MainWindow(QMainWindow):
     def open_export_dialog(self) -> None:
         if self.image_info is None:
             return
-        # Per user request: remember export settings (format, resolution mode, quality,
-        # DPI) across sessions -- these don't depend on any one image the way overlay
-        # sizing does, so unlike default_overlay_settings_for_image there's no
-        # resolution-based recompute to defeat by restoring them verbatim.
         initial = last_used_store.load_last_used_export_settings()
+        if initial is None:
+            current_mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
+            initial = ExportSettings(stretch_mode="linear" if current_mode == "linear" else "preview")
         dialog = ExportDialog(self.image_info.width, self.image_info.height, self, initial=initial)
         if dialog.exec():
             settings = dialog.export_settings()
@@ -1800,9 +1799,12 @@ class MainWindow(QMainWindow):
         if not path_str:
             return
         try:
-            pixel_data = self.bridge.get_full_pixeldata()
+            if settings.stretch_mode == "preview":
+                pixel_data = self.bridge.get_preview_pixeldata()
+            else:
+                pixel_data = self.bridge.get_full_pixeldata()
         except Exception as exc:
-            QMessageBox.critical(self, "Export Failed", f"Could not read full-resolution image data:\n{exc}")
+            QMessageBox.critical(self, "Export Failed", f"Could not read image data:\n{exc}")
             return
 
         self._progress_dialog = QProgressDialog("Exporting…", None, 0, 0, self)

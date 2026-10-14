@@ -92,22 +92,43 @@ _MACOS_FONTS_DIRS = [
     Path("/System/Library/Fonts"),
     Path("/Library/Fonts"),
 ]
-_LINUX_FONTS_DIRS = [Path("/usr/share/fonts"), Path("/usr/local/share/fonts")]
+_LINUX_FONTS_DIRS = [
+    Path("/usr/share/fonts"),
+    Path("/usr/local/share/fonts"),
+    Path("~/.local/share/fonts").expanduser(),
+    Path("~/.fonts").expanduser(),
+]
+
+_linux_font_index: dict[str, list[Path]] | None = None
+
+
+def _get_linux_font_index() -> dict[str, list[Path]]:
+    global _linux_font_index
+    if _linux_font_index is not None:
+        return _linux_font_index
+    index: dict[str, list[Path]] = {}
+    import os
+
+    for base_dir in _LINUX_FONTS_DIRS:
+        if not base_dir.is_dir():
+            continue
+        try:
+            for root, _, files in os.walk(base_dir):
+                for fname in files:
+                    lower = fname.lower()
+                    if lower.endswith((".ttf", ".ttc", ".otf")):
+                        full_path = Path(root) / fname
+                        stem = Path(fname).stem.lower().replace(" ", "").replace("-", "")
+                        index.setdefault(stem, []).append(full_path)
+                        if "regular" in stem:
+                            index.setdefault(stem.replace("regular", ""), []).append(full_path)
+        except Exception:
+            continue
+    _linux_font_index = index
+    return _linux_font_index
 
 
 def _font_file_candidates(family_name: str) -> list[Path]:
-    """Best-effort file-path guesses for a font family name, keyed by platform. Needed
-    because Pillow's ImageFont.truetype() resolving a bare family name (rather than an
-    actual file path) is a well-known unreliable operation on Windows -- it can raise
-    OSError even when the font is genuinely installed, rather than finding it the way
-    fontconfig does on Linux/macOS. Confirmed by a real report: Bayer-designation Greek
-    letters (annotation.catalogs.bayer_designation_to_greek, e.g. "ξ Sco") rendered
-    correctly in the live Qt canvas -- Qt has its own font-fallback machinery Pillow
-    lacks -- but showed as a missing-glyph box in the exported image, while the plain-
-    ASCII part of the same label ("Sco") rendered fine. That ASCII-fine/non-ASCII-
-    broken split is the signature of silently landing in the `except OSError` branch
-    below and falling back to Pillow's own minimal built-in font, which has very
-    limited Unicode coverage -- not of the requested font itself lacking the glyph."""
     slug = family_name.lower().replace(" ", "")
     system = platform.system()
     if system == "Windows":
@@ -116,24 +137,20 @@ def _font_file_candidates(family_name: str) -> list[Path]:
         return [d / f"{family_name}.ttf" for d in _MACOS_FONTS_DIRS] + [
             d / f"{family_name}.ttc" for d in _MACOS_FONTS_DIRS
         ]
-    return [d / f"{slug}.ttf" for d in _LINUX_FONTS_DIRS]
+    candidates = [d / f"{slug}.ttf" for d in _LINUX_FONTS_DIRS]
+    norm_slug = slug.replace("-", "")
+    idx = _get_linux_font_index()
+    for match in idx.get(norm_slug, []):
+        if match not in candidates:
+            candidates.append(match)
+    return candidates
 
 
-# Verdana specifically because it's the app's own shipped default (theme_dark.qss,
-# presets.py) and confirmed present on both macOS and Windows by default -- used here
-# as a safety net when the *requested* font isn't installed at all (not merely
-# unreliably located by name), which is a real, separate case from the bare-name-
-# lookup issue _font_file_candidates works around: a user's already-saved style
-# (persistence/last_used.py saves on every edit) can still reference an older default
-# font_family from before this app's own default changed, and no amount of file-path
-# guessing finds a font that was never installed to begin with.
 _FALLBACK_FONT_FAMILY = "Verdana"
+_FALLBACK_FONT_FAMILIES = ["Verdana", "DejaVu Sans", "Liberation Sans", "FreeSans"]
 
 
 def _resolve_font_file(family_name: str, size: int) -> ImageFont.FreeTypeFont | None:
-    """Tries a bare-name lookup, then well-known file-path guesses. Returns None if
-    neither works -- i.e. this family isn't installed under this name at all, not just
-    unreliably located (see _font_file_candidates)."""
     try:
         return ImageFont.truetype(family_name, size)
     except OSError:
@@ -153,25 +170,21 @@ def _font_for_style(style, scale: float) -> ImageFont.FreeTypeFont:
     if font is not None:
         return font
 
-    if style.font_family != _FALLBACK_FONT_FAMILY:
-        # debug, not warning: this is an expected, silently-handled path (a user's
-        # already-saved style referencing an older default font_family), not an actual
-        # problem -- per user request, nothing about it should surface in Siril's log.
-        # Python's logging module writes to this process's stderr by default, which
-        # Siril captures and displays as if it came from Siril itself; a WARNING here
-        # showed up looking like a real error even though the fallback works correctly.
-        logger.debug(
-            "Font '%s' is not installed on this system; falling back to '%s' for export.",
-            style.font_family, _FALLBACK_FONT_FAMILY,
-        )
-        font = _resolve_font_file(_FALLBACK_FONT_FAMILY, size)
+    for fallback in _FALLBACK_FONT_FAMILIES:
+        if fallback == style.font_family:
+            continue
+        font = _resolve_font_file(fallback, size)
         if font is not None:
+            logger.debug(
+                "Font '%s' is not installed on this system; falling back to '%s' for export.",
+                style.font_family, fallback,
+            )
             return font
 
     logger.debug(
-        "Could not locate '%s' or the fallback font '%s' by name or file path; using "
+        "Could not locate '%s' or fallback fonts by name or file path; using "
         "Pillow's built-in default font (limited Unicode coverage).",
-        style.font_family, _FALLBACK_FONT_FAMILY,
+        style.font_family,
     )
     return ImageFont.load_default(size=size)
 
@@ -555,12 +568,13 @@ def export_image(
         import tifffile
 
         arr16 = (np.asarray(composited, dtype=np.float32) / 255.0 * 65535.0 + 0.5).astype(np.uint16)
-        tifffile.imwrite(
-            output_path,
-            arr16,
-            resolution=(settings.dpi, settings.dpi),
-            photometric="rgb",
-        )
+        write_kwargs = {
+            "resolution": (settings.dpi, settings.dpi),
+            "photometric": "rgb",
+        }
+        if icc_bytes:
+            write_kwargs["iccprofile"] = icc_bytes
+        tifffile.imwrite(output_path, arr16, **write_kwargs)
     else:
         raise ValueError(f"Unsupported export format: {settings.format}")
 

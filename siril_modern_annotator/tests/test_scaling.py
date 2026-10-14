@@ -141,3 +141,19 @@ def test_export_image_with_channels_first_raw_data_produces_correct_dimensions(t
             f"expected ({width}, {height}), got {saved.size} -- "
             "channels-first shape[0]/[1] bug reproduced"
         )
+
+
+def test_export_image_tiff16_embeds_icc_profile(tmp_path):
+    import tifffile
+
+    data = np.zeros((50, 50, 3), dtype=np.uint8)
+    style = StylePreset(name="test")
+    settings = ExportSettings(format="tiff16", resolution_mode="original")
+    out_path = tmp_path / "test16.tif"
+    icc_data = b"MOCK_ICC_PROFILE_BYTES_FOR_TIFF"
+    export_image(out_path, data, [], style, settings, icc_profile=icc_data)
+
+    with tifffile.TiffFile(out_path) as tif:
+        tag = tif.pages[0].tags.get("InterColorProfile")
+        assert tag is not None
+        assert tag.value == icc_data

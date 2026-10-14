@@ -89,7 +89,9 @@ def load_last_used_export_settings() -> ExportSettings | None:
     if not raw:
         return None
     try:
-        return ExportSettings(**json.loads(raw))
+        data = json.loads(raw)
+        valid_keys = ExportSettings.__dataclass_fields__.keys()
+        return ExportSettings(**{k: v for k, v in data.items() if k in valid_keys})
     except Exception:
         logger.exception("Failed to parse saved last-used export settings; ignoring them")
         return None

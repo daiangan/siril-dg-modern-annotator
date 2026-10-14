@@ -50,6 +50,7 @@ class ExportSettings:
     custom_height: int | None = None
     jpeg_quality: int = 92
     dpi: int = 300
+    stretch_mode: str = "preview"  # preview | linear
 
 
 @dataclass
@@ -171,7 +172,9 @@ def load(path: Path) -> ProjectData:
     )
     global_style = style_preset_from_dict(payload["global_style"])
     annotations = [annotation_from_dict(a) for a in payload["annotations"]]
-    export_settings = ExportSettings(**payload["export_settings"])
+    raw_export = payload.get("export_settings", {})
+    valid_keys = ExportSettings.__dataclass_fields__.keys()
+    export_settings = ExportSettings(**{k: v for k, v in raw_export.items() if k in valid_keys})
     # A project file saved before overlay_settings existed simply has no key for it --
     # ProjectData's own default_factory=OverlaySettings (both start disabled) covers
     # that case rather than raising a KeyError.
