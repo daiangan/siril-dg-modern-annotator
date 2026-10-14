@@ -323,8 +323,8 @@ class MainWindow(QMainWindow):
         # pixel data from Siril) vs Linear (un-stretched pixel data).
         toolbar.addWidget(QLabel("Preview:"))
         self.preview_mode_combo = QComboBox()
-        self.preview_mode_combo.addItem("Auto Stretch", "auto")
         self.preview_mode_combo.addItem("Linear", "linear")
+        self.preview_mode_combo.addItem("Auto Stretch", "auto")
         saved_preview_mode = last_used_store.load_last_used_preview_mode()
         if saved_preview_mode:
             idx = self.preview_mode_combo.findData(saved_preview_mode)
@@ -538,7 +538,7 @@ class MainWindow(QMainWindow):
     def refresh_preview_image(self, fit: bool = True) -> None:
         """Fetches pixel data per the current preview-mode selection and updates the
         canvas's base image. Called on initial load and when switching preview stretch modes."""
-        mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
+        mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "linear"
         try:
             if mode == "linear":
                 pixel_data = self.bridge.get_full_pixeldata()
@@ -1757,7 +1757,7 @@ class MainWindow(QMainWindow):
         if self.image_info is None:
             return
         initial = last_used_store.load_last_used_export_settings()
-        current_preview_mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
+        current_preview_mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "linear"
         default_stretch = "linear" if current_preview_mode == "linear" else "preview"
         if initial is None:
             initial = ExportSettings(stretch_mode=default_stretch)
