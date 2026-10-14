@@ -1,4 +1,4 @@
-"""Export settings dialog (brief #21-23): format, resolution mode, quality, DPI."""
+"""Export settings dialog: format, stretch mode, resolution mode, quality, DPI."""
 
 from __future__ import annotations
 

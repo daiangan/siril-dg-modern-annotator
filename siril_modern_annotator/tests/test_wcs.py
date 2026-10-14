@@ -1,4 +1,4 @@
-"""Known RA/Dec -> expected native pixel position, and the inverse (brief #35)."""
+"""Tests for WCS coordinate transformations between RA/Dec and native pixel positions."""
 
 from __future__ import annotations
 

@@ -46,7 +46,7 @@ class ConstellationName:
     dec: float
 
 
-def _safe_float(value: str | None) -> float | None:
+def _parse_coord_float(value: str | None) -> float | None:
     try:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -54,9 +54,7 @@ def _safe_float(value: str | None) -> float | None:
 
 
 def load_constellation_lines(catalogue_dir: Path) -> list[ConstellationLine]:
-    """Empty list (not an exception) when the file is missing -- same "goes quietly
-    dark rather than crashing" convention as LocalCsvProvider._parse_file, so an older
-    Siril install without this data simply shows no constellation lines."""
+    """Loads constellation line segments from CSV, returning an empty list if not found."""
     path = Path(catalogue_dir) / _LINES_FILENAME
     if not path.is_file():
         logger.warning("Constellation lines file not found: %s", path)
@@ -64,8 +62,8 @@ def load_constellation_lines(catalogue_dir: Path) -> list[ConstellationLine]:
     lines: list[ConstellationLine] = []
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            ra0, dec0 = _safe_float(row.get("ra")), _safe_float(row.get("dec"))
-            ra1, dec1 = _safe_float(row.get("ra1")), _safe_float(row.get("dec1"))
+            ra0, dec0 = _parse_coord_float(row.get("ra")), _parse_coord_float(row.get("dec"))
+            ra1, dec1 = _parse_coord_float(row.get("ra1")), _parse_coord_float(row.get("dec1"))
             if ra0 is None or dec0 is None or ra1 is None or dec1 is None:
                 continue
             lines.append(ConstellationLine(ra0, dec0, ra1, dec1))
@@ -73,6 +71,7 @@ def load_constellation_lines(catalogue_dir: Path) -> list[ConstellationLine]:
 
 
 def load_constellation_names(catalogue_dir: Path) -> list[ConstellationName]:
+    """Loads constellation label positions from CSV, returning an empty list if not found."""
     path = Path(catalogue_dir) / _NAMES_FILENAME
     if not path.is_file():
         logger.warning("Constellation names file not found: %s", path)
@@ -81,7 +80,7 @@ def load_constellation_names(catalogue_dir: Path) -> list[ConstellationName]:
     with open(path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             name = (row.get("name") or "").strip()
-            ra, dec = _safe_float(row.get("ra")), _safe_float(row.get("dec"))
+            ra, dec = _parse_coord_float(row.get("ra")), _parse_coord_float(row.get("dec"))
             if not name or ra is None or dec is None:
                 continue
             names.append(ConstellationName(name, ra, dec))

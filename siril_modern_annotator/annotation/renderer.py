@@ -4,7 +4,7 @@ This module computes *where* things go (label bounding box, connector line point
 never draws anything itself — no Qt, no Pillow. gui/annotation_item.py (QPainter) and
 export/exporter.py (Pillow ImageDraw) both call these same functions before drawing, so
 interactive preview and full-resolution export are guaranteed to place markers, labels,
-and connectors identically (ARCHITECTURE.md #8) — only the pixel-drawing backend and the
+and connectors identically — only the pixel-drawing backend and the
 scale factor differ.
 """
 
@@ -36,8 +36,8 @@ from .models import (
 )
 from .wcs import SirilWcs
 
-# Below this marker-to-label-center distance, the label is considered "attached" and no
-# connector line is drawn (brief #10's connector is only for labels moved away).
+# Below this marker-to-label-center distance, the label is considered attached and no
+# connector line is drawn.
 _ATTACHED_THRESHOLD_PX = 4.0
 
 # Default fraction of the smaller image dimension used as a sane cap on angular-size-
@@ -155,7 +155,7 @@ def compute_marker_geometry(
     # angular-size auto-scaling entirely rather than applying it to a field
     # (radius_x/radius_y) style.size_from_angular_size doesn't even describe.
     if style.shape is not MarkerShape.ELLIPSE and style.size_from_angular_size and ann.angular_size and arcsec_per_px:
-        # angular_size is in arcmin (RESEARCH.md local-catalog schema); convert to px.
+        # angular_size is in arcminutes; convert to pixels.
         angular_radius_arcsec = (ann.angular_size * 60.0) / 2.0
         radius = max(radius, angular_radius_arcsec / arcsec_per_px)
         if max_radius_px is not None:
@@ -690,8 +690,8 @@ def place_grid_label_point(
 def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
     """RA/Dec coordinate grid, clipped to the image frame. Native image pixel space,
     same as every other geometry function here. wcs is the only thing this needs from
-    the caller -- all the actual sky<->pixel math is SirilWcs's (ARCHITECTURE.md #4;
-    this just calls its existing public methods, the same way CatalogFetchWorker does)."""
+    the caller -- all the actual sky<->pixel math is SirilWcs's
+    (this just calls its existing public methods, the same way CatalogFetchWorker does)."""
     if not style.enabled:
         return GridGeometry(lines=[], labels=[], style=style)
 

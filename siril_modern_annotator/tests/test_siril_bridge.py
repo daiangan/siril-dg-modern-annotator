@@ -1,13 +1,4 @@
-"""SirilBridge.log(): writes to Siril's own log/console panel, used for the startup
-credit banner (modern_annotator.py) -- distinct from this script's own Python logger,
-which the user won't see unless Siril was launched from a terminal.
-
-SirilBridge.get_loaded_image_filename(): a best-effort accessor for the actual on-disk
-filename of the loaded image, used to name exports after "the original image name" per
-user request -- RESEARCH.md has no confirmed sirilpy accessor for this, so unlike this
-class's other wrapper methods, it deliberately swallows any failure and returns None
-instead of raising, so a wrong guess at the underlying sirilpy method name degrades to
-the pre-existing OBJECT-keyword-based naming rather than breaking image loading."""
+"""Tests for SirilBridge interface methods and error handling."""
 
 from __future__ import annotations
 

@@ -1,14 +1,8 @@
-"""Thin wrapper around sirilpy.SirilInterface.
+"""Facade wrapping sirilpy.SirilInterface.
 
-Per RESEARCH.md #5 and ARCHITECTURE.md #10, no method on this class is guaranteed
-thread-safe by Siril's own documentation, so by policy every method here must only ever
-be called from the Qt main thread. Worker threads receive plain data (numpy arrays,
-dataclasses) produced by these calls — never a reference to this object or to
-sirilpy itself.
-
-This module assumes `import sirilpy` has already succeeded (see modern_annotator.py,
-which must ensure_installed() our own dependencies via sirilpy *before* importing
-PyQt6/astropy/etc., since sirilpy is what provides ensure_installed in the first place).
+Methods on this class are called on the Qt main thread. Worker threads receive plain data
+(NumPy arrays, dataclasses) produced by these calls, keeping background tasks isolated from
+the live IPC connection.
 """
 
 from __future__ import annotations
@@ -70,9 +64,8 @@ def _format_exposure(value) -> str:
 
 
 class SirilBridge:
-    """Main-thread-only facade over sirilpy.SirilInterface, exposing exactly what
-    Siril Modern Annotator needs (image access, header/WCS-source data, STF/preview,
-    ICC, and the system catalogue directory) — nothing invented beyond RESEARCH.md."""
+    """Main-thread facade over sirilpy.SirilInterface, exposing image access,
+    FITS header and WCS metadata, preview/STF stretch, and catalogue paths."""
 
     def __init__(self):
         self._siril = None
@@ -142,19 +135,17 @@ class SirilBridge:
         )
 
     def get_preview_pixeldata(self, linked: bool = True) -> np.ndarray:
-        """8-bit array autostretched by Siril itself (RESEARCH.md #6) — used for the
-        GUI preview so it matches what the user currently sees on screen."""
+        """8-bit array autostretched by Siril for on-screen preview and matched export."""
         siril = self._require_connection()
         return siril.get_image_pixeldata(preview=True, linked=linked)
 
     def get_full_pixeldata(self) -> np.ndarray:
-        """Raw (linear) pixel data at native resolution, uint16 or float32, used for
-        full-resolution export compositing (ARCHITECTURE.md #9)."""
+        """Raw pixel data at native resolution, uint16 or float32."""
         siril = self._require_connection()
         return siril.get_image_pixeldata(preview=False)
 
     def get_wcs_header_dict(self) -> dict:
-        """Returns a dict suitable for astropy.wcs.WCS(...), per RESEARCH.md #4."""
+        """Returns a dict suitable for constructing an astropy.wcs.WCS instance."""
         import sirilpy.utility as sutil
 
         siril = self._require_connection()

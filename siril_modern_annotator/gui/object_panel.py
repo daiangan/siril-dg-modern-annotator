@@ -1,5 +1,5 @@
-"""Object selection panel: table of detected objects with visibility/search/filter
-(brief #12) and bidirectional selection sync with the canvas.
+"""Object selection panel: table of detected objects with visibility, search, filter,
+and bidirectional selection synchronization with the canvas.
 """
 
 from __future__ import annotations

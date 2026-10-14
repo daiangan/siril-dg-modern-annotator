@@ -1,14 +1,8 @@
-"""Full-resolution compositing and PNG/JPEG/TIFF export (brief #21-23).
+"""Full-resolution compositing and PNG/JPEG/TIFF export.
 
-Per RESEARCH.md #11, sirilpy's only save helper (save_image_file) is FITS-only, so
-PNG/JPEG/TIFF export is plain Python: Pillow for 8-bit formats, tifffile for 16-bit TIFF.
-This module never imports PyQt6 — it takes a plain NumPy array plus a plain list of
-Annotation objects and returns bytes/writes a file, so it can run inside a QThread
-worker (ARCHITECTURE.md #9-10) and be unit-tested headlessly.
-
-The renderer used here (annotation.renderer geometry + Pillow ImageDraw here) is
-independent of the interactive Qt canvas's renderer, but both call the *same* geometry
-functions in annotation/renderer.py, guaranteeing identical placement.
+Renders annotations onto pixel data using Pillow for 8-bit formats and tifffile
+for 16-bit TIFF export. Free of PyQt6 dependencies to allow execution in worker
+threads and headless unit testing.
 """
 
 from __future__ import annotations

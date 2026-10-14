@@ -151,11 +151,15 @@ def test_clean_module_inlines_nested_internal_imports():
         "def query_database():\n"
         "    from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS\n"
         "    return CORRECTED_SH2_POSITIONS\n"
+        "\n"
+        "def empty_func():\n"
+        "    from .sh2_corrected_positions import CORRECTED_SH2_POSITIONS\n"
     )
     doc, cleaned = _clean_module(source)
     assert "from .sh2_corrected_positions" not in cleaned
-    assert "pass  # inlined internal import" in cleaned
+    assert "inlined internal import" not in cleaned
     assert "return CORRECTED_SH2_POSITIONS" in cleaned
+    assert "pass" in cleaned
     compile(cleaned, "<test>", "exec")
 
 

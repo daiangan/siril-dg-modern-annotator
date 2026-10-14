@@ -1,6 +1,4 @@
-"""LocalCsvProvider parses Siril's bundled CSV catalog schema correctly (brief #35),
-using fixture files mirroring the real messier.csv/ngc.csv structure documented in
-RESEARCH.md #8 (name,ra,dec,diameter,mag,alias)."""
+"""Tests for LocalCsvProvider and catalog parsing."""
 
 from __future__ import annotations
 

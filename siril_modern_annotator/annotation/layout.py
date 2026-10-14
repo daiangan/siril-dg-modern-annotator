@@ -1,11 +1,9 @@
-"""Automatic label placement / collision avoidance ("Auto Arrange", brief #11).
+"""Automatic label placement and collision avoidance ("Auto Arrange").
 
-Pure data/geometry, no Qt. The GUI may inject a more accurate `text_measurer` callable
-(backed by QFontMetrics) for pixel-perfect bounding boxes; the default estimator here is
-a reasonable character-count heuristic used both for headless/testable behavior and as
-the fallback when no measurer is supplied.
+Pure data/geometry, independent of Qt. Accepts an optional text_measurer callable
+for exact font bounding boxes, falling back to an estimate when run headlessly.
 
-Algorithm (per brief #11):
+Placement algorithm:
   1. Sort objects by priority (lower number = more important, placed first).
   2. Generate 8 candidate label positions around each marker (compass directions), at
      a couple of distance rings.

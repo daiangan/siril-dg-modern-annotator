@@ -1,4 +1,4 @@
-"""Saving and reopening a project file preserves positions/styles (brief #35)."""
+"""Tests for saving and reopening project layout files."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """default_preset_for_image scales marker *radius* by resolution, since marker geometry
-is defined in native pixel space (ARCHITECTURE.md #4) -- a flat radius looked fine at
+is defined in native pixel space -- a flat radius looked fine at
 one resolution and was nearly invisible against a real ~3000px-wide Siril image. Stroke
 width and font size are fixed, resolution-independent legibility defaults instead (real-
 world testing showed scaling them by resolution compounded into absurd sizes on large
@@ -19,7 +19,8 @@ def _use_temp_settings(monkeypatch, tmp_path):
     them at an isolated temp .ini per test so runs never read or write the real user's
     settings store."""
     ini_path = str(tmp_path / "settings.ini")
-    monkeypatch.setattr(preset_store, "_settings", lambda: QSettings(ini_path, QSettings.Format.IniFormat))
+    monkeypatch.setattr(preset_store, "_preset_settings", lambda: QSettings(ini_path, QSettings.Format.IniFormat))
+
 
 
 def test_reference_resolution_still_scales_radius_up_from_flat_default():

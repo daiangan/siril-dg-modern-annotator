@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Builds a single-file distributable script for the official siril-scripts repository.
 
-Per RESEARCH.md #5 / ARCHITECTURE.md #2: "Scripts should be single-file scripts" is a
-hard submission requirement for gitlab.com/free-astro/siril-scripts. We develop as a
-modular package (siril_modern_annotator/) for testability and maintainability, and
-this build script compiles and inlines it into a clean, standard, top-to-bottom single
-.py file at build time.
+Inlines the modular package (siril_modern_annotator/) into a clean, standard,
+top-to-bottom single Python script for submission to gitlab.com/free-astro/siril-scripts.
 
 Architecture of the inlined bundle:
 - No dynamic loaders, no sys.meta_path, no _MODULE_SOURCES dictionary, and no exec().
@@ -367,11 +364,18 @@ def _clean_module(source: str) -> tuple[str, str]:
             if node.lineno not in top_import_lines:
                 nested_internal_imports.append(node)
 
+    empty_body_lines = set()
+    for parent in ast.walk(tree):
+        for attr in ("body", "orelse", "finalbody"):
+            body = getattr(parent, attr, None)
+            if isinstance(body, list) and len(body) == 1 and body[0] in nested_internal_imports:
+                empty_body_lines.add(body[0].lineno)
+
     for imp in nested_internal_imports:
         indent = len(lines[imp.lineno - 1]) - len(lines[imp.lineno - 1].lstrip())
         for line_idx in range(imp.lineno, imp.end_lineno + 1):
-            if line_idx == imp.lineno:
-                lines[line_idx - 1] = " " * indent + "pass  # inlined internal import\n"
+            if line_idx == imp.lineno and line_idx in empty_body_lines:
+                lines[line_idx - 1] = " " * indent + "pass\n"
             else:
                 lines[line_idx - 1] = ""
 
@@ -380,6 +384,9 @@ def _clean_module(source: str) -> tuple[str, str]:
         if idx in doc_lines or idx in top_import_lines:
             continue
         filtered_lines.append(line)
+
+    while filtered_lines and (filtered_lines[0].startswith("#!") or not filtered_lines[0].strip()):
+        filtered_lines.pop(0)
 
     cleaned_source = "".join(filtered_lines).strip()
     return docstring, cleaned_source

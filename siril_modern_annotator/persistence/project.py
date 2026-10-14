@@ -1,4 +1,4 @@
-"""Annotation layout / project file persistence (brief #27).
+"""Annotation layout and project file persistence.
 
 Saves *only* annotation/layout/style/export state to a `<image>.annotations.json`
 sidecar — never pixel data. A schema_version field is included from day one so future

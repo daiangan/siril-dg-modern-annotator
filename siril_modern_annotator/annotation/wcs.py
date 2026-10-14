@@ -1,10 +1,7 @@
-"""WCS handling.
+"""WCS handling and coordinate transformations.
 
-Per RESEARCH.md #4: sirilpy has no direct get_wcs()/CRVAL/CRPIX accessor. The sanctioned
-path is to read the raw FITS header text via SirilInterface.get_image_fits_header(),
-parse it with sirilpy.utility.parse_fits_header() (which produces an astropy.wcs.WCS
--compatible dict), and build astropy.wcs.WCS ourselves. This module owns that logic and
-is the *only* place in the codebase allowed to do sky<->native-pixel math (ARCHITECTURE.md #4).
+Builds an astropy.wcs.WCS instance from FITS header metadata and handles
+all world (RA/Dec) to native pixel coordinate projections.
 """
 
 from __future__ import annotations

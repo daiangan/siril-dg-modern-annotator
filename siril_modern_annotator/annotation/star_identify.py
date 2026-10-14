@@ -1,40 +1,17 @@
-""""Identify Star" -- right-click a point on the canvas, resolve the nearest star-type
-object(s) to it via SIMBAD's own coordinate search, per explicit user request: Siril's
-own annotator (and this app's bright_star catalog, via Siril's bundled stars.csv) only
-covers naked-eye-ish stars up to roughly magnitude ~10 -- there was no way to identify
-or label anything fainter that Siril didn't already know about.
+"""Interactive star identification via SIMBAD cone search.
 
-Deliberately its own module, not a CatalogProvider: CatalogProvider.query(wcs, catalogs,
-mag_limit) answers "everything in this field for these named catalogs" -- this answers
-"the closest few star-type objects to one specific sky point," a different shape of
-question entirely, triggered by a single right-click rather than a whole-field fetch.
-
-Uses astroquery.simbad.Simbad.query_region, confirmed live to return a table with
-main_id/ra/dec/otype/V columns (or None when nothing is within the search radius).
-Wrapped in _run_with_hard_timeout (see catalogs.py's own docstring on it) -- this exact
-class of astroquery network call has a documented real hang in this codebase already
-(the same reason VizierProvider's own SIMBAD-TAP name resolution was removed, see
-VizierProvider's docstring); reusing the existing safeguard rather than risking that
-again.
-
-Star-type filtering keeps only rows whose otype contains "*" -- SIMBAD's own object-type
-coding scheme puts every star-branch code somewhere in that family ("*", "**", "WR*",
-"SB*", "V*", "PM*", ...), confirmed live against real objects, and confirmed live that
-non-star types this app must exclude (open clusters "OpC", HII regions "HII", supernova
-remnants "SNR") do not. Known, accepted gap: "Psr" (pulsar) has no asterisk and would be
-excluded by this rule -- a real but rare edge case, not worth the added complexity of a
-star-type allowlist for v1.
+Provides coordinate-based resolution of stellar objects near clicked points,
+querying SIMBAD for objects with stellar object types ("*") within a specified
+angular radius.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Search radius: a small, native-pixel-based click tolerance converted to arcsec via the
-# image's own plate-solved pixel scale -- deliberately NOT derived from the user's own
-# (customizable, unrelated) marker-radius style setting. Clamped so a very high-
-# resolution image doesn't shrink the radius to a useless sub-arcsec sliver, and a very
-# wide-field image doesn't balloon it into pulling in unrelated background stars.
+from .catalogs import _run_with_hard_timeout
+
+# Search radius bounds based on native pixel scale
 _STAR_IDENTIFY_TOLERANCE_NATIVE_PX = 12.0
 _STAR_IDENTIFY_MIN_RADIUS_ARCSEC = 3.0
 _STAR_IDENTIFY_MAX_RADIUS_ARCSEC = 20.0
@@ -59,8 +36,6 @@ def identify_stars(ra: float, dec: float, radius_arcsec: float, max_candidates: 
     from astropy import units as u
     from astropy.coordinates import SkyCoord
     from astroquery.simbad import Simbad
-
-    from .catalogs import _run_with_hard_timeout
 
     center = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
     custom = Simbad()

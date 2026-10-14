@@ -1,4 +1,4 @@
-"""Style presets: built-in (code-defined, brief #17) plus user-created (QSettings-backed).
+"""Style presets: built-in presets plus user-created (QSettings-backed) presets.
 
 Built-in presets are never persisted to QSettings, so a corrupted or reset settings file
 can never lose them; user presets layer on top under a separate settings group.
@@ -66,7 +66,7 @@ def default_preset() -> StylePreset:
 
 
 # Marker *radius* still needs to track image resolution -- our geometry is native-pixel
-# space (ARCHITECTURE.md #4), and a flat radius looked fine at one resolution and was
+# space, and a flat radius looked fine at one resolution and was
 # nearly invisible at another (confirmed against a real 2952x1936 image). Stroke width
 # and font size, by contrast, are legibility choices, not size-of-object choices: real-
 # world testing converged on fixed, resolution-independent defaults (6px strokes, 60pt
@@ -158,12 +158,12 @@ def _preset_to_dict(preset: StylePreset) -> dict:
     return to_jsonable(asdict(preset))
 
 
-def _settings() -> QSettings:
+def _preset_settings() -> QSettings:
     return QSettings(ORG_NAME, APP_NAME)
 
 
 def load_user_presets() -> dict[str, StylePreset]:
-    raw = _settings().value(_USER_PRESETS_KEY, "")
+    raw = _preset_settings().value(_USER_PRESETS_KEY, "")
     if not raw:
         return {}
     try:
@@ -176,7 +176,7 @@ def load_user_presets() -> dict[str, StylePreset]:
 def save_user_preset(preset: StylePreset) -> None:
     presets = load_user_presets()
     presets[preset.name] = preset
-    _settings().setValue(
+    _preset_settings().setValue(
         _USER_PRESETS_KEY,
         json.dumps({name: _preset_to_dict(p) for name, p in presets.items()}),
     )
@@ -185,7 +185,7 @@ def save_user_preset(preset: StylePreset) -> None:
 def delete_user_preset(name: str) -> None:
     presets = load_user_presets()
     presets.pop(name, None)
-    _settings().setValue(
+    _preset_settings().setValue(
         _USER_PRESETS_KEY,
         json.dumps({n: _preset_to_dict(p) for n, p in presets.items()}),
     )

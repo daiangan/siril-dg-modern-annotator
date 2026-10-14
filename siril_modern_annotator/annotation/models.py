@@ -204,7 +204,7 @@ class StylePreset:
 class Annotation:
     """A single astronomical annotation.
 
-    Coordinate contract (see ARCHITECTURE.md #4):
+    Coordinate contract:
       - ra/dec are the permanent source of truth (sky space).
       - image_x/image_y are the object's position in *native* image pixel space,
         derived once from ra/dec via the image's WCS and never overwritten -- always
@@ -269,7 +269,7 @@ class Annotation:
     # converted to native px at render time via the image's own arcsec_per_px);
     # position_angle_screen_deg is pre-converted to on-screen rotation at enrichment
     # time (needs the image's actual WCS orientation, which compute_marker_geometry
-    # itself deliberately never touches -- see ARCHITECTURE.md #4).
+    # itself deliberately never touches).
     galaxy_major_axis_arcmin: float | None = None
     galaxy_minor_axis_arcmin: float | None = None
     galaxy_position_angle_screen_deg: float | None = None
@@ -315,7 +315,7 @@ class Annotation:
         return replace(self, **overrides)
 
 
-# Default priority ordering, per brief #11 step 5. Lower number = placed/kept first.
+# Default catalog priority ordering: lower number = placed/kept first.
 CATALOG_PRIORITY: dict[str, int] = {
     "messier": 10,
     "sh2": 15,

@@ -1,5 +1,5 @@
-"""Label/marker/connector styling controls: global default style (brief #15-17) plus
-per-object overrides for the currently selected annotation (brief #18).
+"""Label, marker, and connector styling controls: global default style plus
+per-object overrides for the currently selected annotation.
 """
 
 from __future__ import annotations

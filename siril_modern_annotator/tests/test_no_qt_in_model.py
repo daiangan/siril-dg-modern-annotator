@@ -1,4 +1,4 @@
-"""Import-lint guard (ARCHITECTURE.md #5, #9): the annotation model and the export
+"""Import-lint guard: the annotation model and the export
 renderer must stay importable and testable without PyQt6, so neither package may import
 it. This is what lets annotation/ and export/ be unit tested headlessly and guarantees
 the export renderer can never accidentally depend on the interactive Qt canvas.

@@ -7,7 +7,7 @@ Same coordinate convention as annotation_item.py: native image pixel space, so n
 manual preview<->native conversion is needed here either. Geometry comes from
 annotation.renderer's compute_grid_geometry/compute_compass_geometry -- this module
 only turns that geometry into QPainter calls, mirroring export/exporter.py's Pillow
-calls off the exact same functions (ARCHITECTURE.md #8).
+calls off the exact same functions.
 """
 
 from __future__ import annotations

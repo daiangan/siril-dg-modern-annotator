@@ -1,4 +1,4 @@
-"""QUndoCommand subclasses for every mutating GUI operation (brief #25).
+"""QUndoCommand subclasses for mutating GUI operations.
 
 Each command stores plain before/after values and calls a refresh callback after
 mutating the model — it never talks to Siril or does I/O, keeping undo/redo entirely

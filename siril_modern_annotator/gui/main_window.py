@@ -1,9 +1,8 @@
-"""Main application window (brief #4 layout, #41 MVP feature set).
+"""Main application window.
 
-Owns: the annotation list, the active global StylePreset, the undo stack, and every
-signal wire-up between image_view / object_panel / style_panel / the graphics items.
-This is the only module allowed to call SirilBridge methods (aside from the entry
-point), and it only ever does so on the main thread.
+Owns: the annotation list, active global StylePreset, undo stack, and signal
+connections between image_view, object_panel, style_panel, and overlay items.
+Interacts with SirilBridge on the main GUI thread.
 """
 
 from __future__ import annotations
@@ -177,15 +176,9 @@ class MainWindow(QMainWindow):
             self.active_catalogs = set(_DEFAULT_CATALOGS)
             if self._user_dso_catalog_should_default_on():
                 self.active_catalogs.add("user_dso")
-        # Per-catalog marker/connector color (brief #13-adjacent request). A single
-        # dict, mutated in place (never reassigned wholesale) on every edit -- every
-        # MarkerItem/ConnectorItem is handed this exact same object at construction, so
-        # a color change is visible to all of them on their next repaint with no need
-        # to walk the scene reassigning references, the way global_style has to.
-        # Start from the shipped defaults, then overlay whatever was saved -- so a
-        # catalog the user never touched (or one added in a later version, after their
-        # last save) still gets a sensible default color instead of silently falling
-        # back to the plain global marker/connector color forever.
+        # Per-catalog marker/connector color mappings. Mutated in place on edits
+        # so all child graphics items receive the updated colors on next repaint.
+        # Defaults overlay saved values, preserving default colors for new catalogs.
         self.catalog_colors: dict[str, str] = dict(DEFAULT_CATALOG_COLORS)
         saved_catalog_colors = last_used_store.load_last_used_catalog_colors()
         if saved_catalog_colors is not None:
@@ -326,12 +319,8 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(zoom_100_btn)
         toolbar.addSeparator()
 
-        # brief #19-20: preview stretch control. We always defaulted to Siril's own
-        # preview=True autostretch with no way to turn it off -- a real gap, since that
-        # autostretch may not be what the user wants or expects to see. "Auto Stretch"
-        # uses Siril's own get_image_pixeldata(preview=True); "Linear" uses the raw
-        # (non-preview) pixel data through our own simple linear normalization
-        # (annotation.pixel_utils), i.e. no stretch curve applied at all.
+        # Preview stretch mode control: Auto Stretch (preview=True autostretched
+        # pixel data from Siril) vs Linear (un-stretched pixel data).
         toolbar.addWidget(QLabel("Preview:"))
         self.preview_mode_combo = QComboBox()
         self.preview_mode_combo.addItem("Auto Stretch", "auto")
@@ -344,24 +333,9 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.preview_mode_combo)
         toolbar.addSeparator()
 
-        # brief #13: catalog toggle UI, matching Siril's own catalog picker (checkboxes
-        # per catalog). This never existed before -- the active catalog set was a
-        # hardcoded constant with no way to change it from the GUI at all. Uses
-        # QToolButton (InstantPopup) rather than QPushButton.setMenu(), which rendered
-        # its dropdown arrow visibly misaligned from the button text with our dark
-        # stylesheet (confirmed by a real screenshot) -- QToolButton's menu-indicator is
-        # a standard, separately styleable sub-control instead. The menu itself is a
-        # CheckableMenu so toggling several catalogs doesn't require reopening the menu
-        # after every single click (confirmed as real friction: default QMenu behavior
-        # closes on every action activation).
+        # Catalog toggle UI allowing individual catalogs to be enabled/disabled.
+        # Uses QToolButton with instant popup menu to allow multi-selection.
         catalogs_btn = QToolButton()
-        # A plain unicode arrow appended to the text, with the native menu-indicator
-        # disabled in the stylesheet, rather than relying on QToolButton's built-in
-        # indicator subcontrol -- a real screenshot showed that indicator rendering
-        # directly on top of the button text with our stylesheet (Windows' native
-        # style interacts with subcontrol-position/-origin QSS inconsistently), and a
-        # character in the text itself can't overlap anything since it's laid out as
-        # part of the normal text flow.
         catalogs_btn.setText("Catalogs ▾")
         catalogs_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         catalogs_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
@@ -377,10 +351,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(catalogs_btn)
         toolbar.addSeparator()
 
-        # RA/Dec grid + compass: off by default, quick on/off here (brief: "should be
-        # turned off by default and then displayed if the user wants") -- style/color
-        # customization lives in the Style panel's Overlays tab, same "quick toggle
-        # here, full editing there" split as the Catalogs button above.
+        # RA/Dec grid, compass, and overlay quick toggles
         overlays_btn = QToolButton()
         overlays_btn.setText("Overlays ▾")
         overlays_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -485,7 +456,7 @@ class MainWindow(QMainWindow):
             # Grantecan/GTC download that has a complete, valid TAN-SIP solution but no
             # PLTSOLVD card at all) has no reason to carry that keyword. We already build
             # our own astropy.wcs.WCS straight from the header for every actual
-            # coordinate transform (ARCHITECTURE.md #4) rather than trusting Siril's
+            # coordinate transform rather than trusting Siril's
             # flag for the math, so attempt that construction regardless of
             # plate_solved and only treat it as "not solved" if the header genuinely has
             # no usable celestial WCS -- see SirilWcs.from_header_dict.
@@ -536,7 +507,7 @@ class MainWindow(QMainWindow):
                 Path(loaded_filename).stem if loaded_filename else (self.image_info.object_name or "untitled")
             )
 
-            # Marker/label geometry is native-pixel-space (ARCHITECTURE.md #4), so a
+            # Marker/label geometry is native-pixel-space, so a
             # flat default size looks fine at one resolution and is nearly invisible at
             # another -- confirmed by real-world testing. Scale the starting style to
             # this image's actual resolution instead of using a fixed constant. Skip
@@ -565,9 +536,7 @@ class MainWindow(QMainWindow):
 
     def refresh_preview_image(self, fit: bool = True) -> None:
         """Fetches pixel data per the current preview-mode selection and updates the
-        canvas's base image. Called on initial load and whenever the user switches
-        Auto Stretch <-> Linear (brief #19-20) -- annotation items are untouched
-        (image_view.set_base_image no longer clears the scene)."""
+        canvas's base image. Called on initial load and when switching preview stretch modes."""
         mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
         try:
             if mode == "linear":
@@ -1283,7 +1252,7 @@ class MainWindow(QMainWindow):
         # ra/dec (not just image_x/image_y) are needed even for a manually-placed
         # object -- the RA/Dec grid, the info box, and the Objects panel's RA/Dec
         # display all read straight off the annotation, same as any catalog object
-        # (ARCHITECTURE.md #4's "ra/dec are the permanent source of truth").
+        # (ra/dec are the permanent source of truth).
         ra, dec = self.wcs.pixel_to_world(x, y)
         # A custom object has no catalog angular_size, so it never benefits from
         # compute_marker_geometry's angular-size-based upscaling (renderer.py) the way
@@ -1385,7 +1354,7 @@ class MainWindow(QMainWindow):
         # candidate.ra/dec (resolved by SIMBAD) is authoritative here, not the original
         # click position -- the click was only the search center, same "ra/dec is the
         # permanent source of truth" contract every other catalog object already
-        # follows (ARCHITECTURE.md #4). Unlike _add_custom_object (where the click
+        # follows. Unlike _add_custom_object (where the click
         # itself has no other position to snap to), getting this backwards would leave
         # the marker sitting at the click instead of the star's real position.
         image_x, image_y = self.wcs.world_to_pixel(candidate.ra, candidate.dec)

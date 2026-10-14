@@ -1,5 +1,4 @@
-"""Native -> export-target resolution scaling (brief #35 'Export scaling':
-native annotation coordinates remain correct at arbitrary output sizes)."""
+"""Tests for native to export-target resolution scaling."""
 
 from __future__ import annotations
 

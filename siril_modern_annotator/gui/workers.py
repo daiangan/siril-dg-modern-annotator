@@ -1,11 +1,7 @@
-"""QThread workers for anything network- or CPU-bound enough to block the GUI
-(brief #30-31; pattern taken from siril-scripts/core/Siril_Catalog_Installer.py and
-VeraLux/VeraLux_Alchemy.py — see RESEARCH.md #5).
+"""QThread workers for background asynchronous operations.
 
-Workers receive plain data in their constructors and emit plain data back via
-pyqtSignal — never a SirilBridge/SirilInterface reference, and never a QWidget touched
-from run(). This structurally enforces the main-thread-only sirilpy policy
-(ARCHITECTURE.md #10).
+Workers receive plain data in their constructors and emit results back via
+pyqtSignal, ensuring SirilBridge and GUI widgets remain isolated to the main thread.
 """
 
 from __future__ import annotations
@@ -20,6 +16,7 @@ from ..annotation.constellations import ConstellationLine, ConstellationName
 from ..annotation.models import Annotation, OverlaySettings, StylePreset
 from ..annotation.star_identify import identify_stars
 from ..annotation.wcs import SirilWcs
+from ..export.exporter import export_image
 from ..persistence.project import ExportSettings
 
 
@@ -118,8 +115,6 @@ class ExportWorker(QThread):
         self._constellation_names = constellation_names
 
     def run(self) -> None:
-        from ..export.exporter import export_image
-
         try:
             if self.isInterruptionRequested():
                 return
