@@ -325,10 +325,11 @@ class MainWindow(QMainWindow):
         self.preview_mode_combo = QComboBox()
         self.preview_mode_combo.addItem("Auto Stretch", "auto")
         self.preview_mode_combo.addItem("Linear", "linear")
-        # Deliberately not part of last-used persistence (unlike catalogs/style below):
-        # this is a one-off viewing choice for comparing against Siril's own preview,
-        # not a general preference the user wants to carry into their next session --
-        # always starts at the "Linear" default.
+        saved_preview_mode = last_used_store.load_last_used_preview_mode()
+        if saved_preview_mode:
+            idx = self.preview_mode_combo.findData(saved_preview_mode)
+            if idx >= 0:
+                self.preview_mode_combo.setCurrentIndex(idx)
         self.preview_mode_combo.currentIndexChanged.connect(self._on_preview_mode_changed)
         toolbar.addWidget(self.preview_mode_combo)
         toolbar.addSeparator()
@@ -550,6 +551,9 @@ class MainWindow(QMainWindow):
         self._set_preview_image(pixel_data, fit=fit)
 
     def _on_preview_mode_changed(self) -> None:
+        mode = self.preview_mode_combo.currentData()
+        if mode in ("auto", "linear"):
+            last_used_store.save_last_used_preview_mode(mode)
         if self.image_info is not None:
             self.refresh_preview_image(fit=False)
 
@@ -1753,9 +1757,12 @@ class MainWindow(QMainWindow):
         if self.image_info is None:
             return
         initial = last_used_store.load_last_used_export_settings()
+        current_preview_mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
+        default_stretch = "linear" if current_preview_mode == "linear" else "preview"
         if initial is None:
-            current_mode = self.preview_mode_combo.currentData() if hasattr(self, "preview_mode_combo") else "auto"
-            initial = ExportSettings(stretch_mode="linear" if current_mode == "linear" else "preview")
+            initial = ExportSettings(stretch_mode=default_stretch)
+        else:
+            initial.stretch_mode = default_stretch
         dialog = ExportDialog(self.image_info.width, self.image_info.height, self, initial=initial)
         if dialog.exec():
             settings = dialog.export_settings()

@@ -492,6 +492,8 @@ def build() -> Path:
                     "    load_last_used_export_settings=load_last_used_export_settings,\n"
                     "    save_last_used_overlay_settings=save_last_used_overlay_settings,\n"
                     "    apply_last_used_overlay_settings=apply_last_used_overlay_settings,\n"
+                    "    save_last_used_preview_mode=save_last_used_preview_mode,\n"
+                    "    load_last_used_preview_mode=load_last_used_preview_mode,\n"
                     ")\n\n"
                 )
 

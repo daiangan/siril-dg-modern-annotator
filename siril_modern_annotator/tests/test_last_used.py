@@ -1,12 +1,6 @@
-"""Last-used general settings (catalogs, global style, per-catalog colors) must round-
-trip through QSettings and be distinct from both named user presets (presets.py) and
-per-image project layout files (project.py) -- brief: restore the user's last-used
-general configuration on a brand-new/different image instead of hardcoded defaults.
-
-Preview stretch mode is deliberately NOT part of this: it's a one-off viewing choice
-for comparing against Siril's own preview, not a general style/catalog preference --
-confirmed by a real regression report where remembering it caused the image to reopen
-in "Auto Stretch" after the user briefly switched to it for a side-by-side comparison.
+"""Last-used general settings (catalogs, global style, per-catalog colors, export settings,
+and preview stretch mode) must round-trip through QSettings and be distinct from both
+named user presets (presets.py) and per-image project layout files (project.py).
 
 Each test points QSettings at an isolated temp .ini file (via monkeypatching
 last_used._settings) so runs never read or write the real user's settings store.
@@ -243,3 +237,26 @@ def test_corrupted_overlay_settings_value_falls_back_to_defaults(monkeypatch, tm
     result = last_used.apply_last_used_overlay_settings(defaults)
     assert result is defaults
     assert result.grid.enabled is False  # untouched flat dataclass default
+
+
+# ----------------------------------------------------------------- preview mode ----
+
+
+def test_no_saved_preview_mode_returns_none(monkeypatch, tmp_path):
+    _use_temp_settings(monkeypatch, tmp_path)
+    assert last_used.load_last_used_preview_mode() is None
+
+
+def test_preview_mode_round_trips(monkeypatch, tmp_path):
+    _use_temp_settings(monkeypatch, tmp_path)
+    last_used.save_last_used_preview_mode("linear")
+    assert last_used.load_last_used_preview_mode() == "linear"
+    last_used.save_last_used_preview_mode("auto")
+    assert last_used.load_last_used_preview_mode() == "auto"
+
+
+def test_invalid_saved_preview_mode_returns_none(monkeypatch, tmp_path):
+    _use_temp_settings(monkeypatch, tmp_path)
+    last_used._settings().setValue(last_used._PREVIEW_MODE_KEY, "invalid_mode")
+    assert last_used.load_last_used_preview_mode() is None
+

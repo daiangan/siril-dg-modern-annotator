@@ -28,6 +28,7 @@ _CATALOGS_KEY = "last_used/active_catalogs"
 _CATALOG_COLORS_KEY = "last_used/catalog_colors"
 _OVERLAY_KEY = "last_used/overlay_settings"
 _EXPORT_KEY = "last_used/export_settings"
+_PREVIEW_MODE_KEY = "last_used/preview_mode"
 
 
 def _settings() -> QSettings:
@@ -95,6 +96,18 @@ def load_last_used_export_settings() -> ExportSettings | None:
     except Exception:
         logger.exception("Failed to parse saved last-used export settings; ignoring them")
         return None
+
+
+def save_last_used_preview_mode(mode: str) -> None:
+    if mode in ("auto", "linear"):
+        _settings().setValue(_PREVIEW_MODE_KEY, mode)
+
+
+def load_last_used_preview_mode() -> str | None:
+    raw = _settings().value(_PREVIEW_MODE_KEY, None)
+    if raw in ("auto", "linear"):
+        return str(raw)
+    return None
 
 
 # Only the fields below are saved for overlays -- per user request, "settings that do
