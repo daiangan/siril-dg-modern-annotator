@@ -140,9 +140,27 @@ def test_local_csv_provider_with_custom_mapping_ignores_unmapped_catalogs(tmp_pa
     csv_path = tmp_path / "user-DSO-catalogue.csv"
     csv_path.write_text("name,ra,dec,mag,alias\nHD 191765,310.0,41.0,8.08,wr134\n")
     provider = LocalCsvProvider(tmp_path, catalog_files={"user_dso": "user-DSO-catalogue.csv"})
-    # "messier" isn't in this custom mapping at all -- must not fall back to the
-    # module-level default and must not error.
     assert provider.query(_wcs(), {"messier"}) == []
+
+
+def test_local_csv_provider_preserves_zero_ra_and_dec(tmp_path):
+    """Verify that coordinates at RA=0.0 or Dec=0.0 are not discarded as falsy/NaN."""
+    csv_path = tmp_path / "zero_coords.csv"
+    csv_path.write_text("name,ra,dec,mag,alias\nZeroObj,0.0,0.0,5.0,\n")
+    provider = LocalCsvProvider(tmp_path, catalog_files={"zero": "zero_coords.csv"})
+    header = {
+        "NAXIS": 2, "NAXIS1": _WIDTH, "NAXIS2": _HEIGHT,
+        "CTYPE1": "RA---TAN", "CTYPE2": "DEC--TAN",
+        "CRPIX1": _WIDTH / 2.0, "CRPIX2": _HEIGHT / 2.0,
+        "CRVAL1": 0.0, "CRVAL2": 0.0,
+        "CDELT1": -_PIXEL_SCALE_DEG, "CDELT2": _PIXEL_SCALE_DEG,
+        "CUNIT1": "deg", "CUNIT2": "deg",
+    }
+    wcs_zero = SirilWcs.from_header_dict(header, _WIDTH, _HEIGHT)
+    results = provider.query(wcs_zero, {"zero"})
+    assert len(results) == 1
+    assert results[0].ra == 0.0
+    assert results[0].dec == 0.0
 
 
 def test_count_local_catalog_entries_missing_file_returns_zero(tmp_path):

@@ -50,7 +50,7 @@ def main() -> int:
 
     s.ensure_installed(
         "PyQt6", "astropy", "astroquery", "Pillow", "tifffile",
-        version_constraints=[">=6.4", ">=5.3", ">=0.4", ">=10.0", ">=2021.7"],
+        version_constraints=[">=6.4", ">=5.3", ">=0.4.8", ">=10.1", ">=2021.7"],
     )
 
     from .siril_bridge.interface import SirilBridge, SirilBridgeError
@@ -71,12 +71,6 @@ def main() -> int:
         # over something as minor as a sirilpy logging API mismatch.
         logger.debug("Could not write the startup banner to Siril's log.", exc_info=True)
 
-    if platform.system().lower() == "linux":
-        # Force XWayland/xcb on Linux: pure Wayland compositors on KDE/GNOME can fail or
-        # hang when mapping child-process windows (matching upstream Siril scripts).
-        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-
-    # Deferred until after ensure_installed() has run.
     from PyQt6.QtGui import QIcon, QPixmap
     from PyQt6.QtWidgets import QApplication
 

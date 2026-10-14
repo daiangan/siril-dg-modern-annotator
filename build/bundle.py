@@ -158,15 +158,11 @@ warnings.filterwarnings(
     category=RuntimeWarning,
 )
 
-# Linux platform compatibility: force xcb on Linux (matching upstream Siril scripts)
-if platform.system().lower() == "linux":
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-
 try:
     import sirilpy as s
     s.ensure_installed(
         "PyQt6", "astropy", "astroquery", "Pillow", "tifffile",
-        version_constraints=[">=6.4", ">=5.3", ">=0.4", ">=10.0", ">=2021.7"],
+        version_constraints=[">=6.4", ">=5.3", ">=0.4.8", ">=10.1", ">=2021.7"],
     )
 except ImportError:
     pass

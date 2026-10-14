@@ -21,16 +21,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-MINIMUM_SIRIL_VERSION = "1.4.0"
-# No sirilpy module-version floor is enforced here. RESEARCH.md's ">=1.1.14" figure came
-# from the ReadTheDocs "latest" branch, which tracks Siril 1.5-dev -- not what actually
-# ships with 1.4.x stable (real-world prior art, e.g. siril-scripts/utility/
-# Galaxy_Annotations.py, gates on sirilpy >=0.6.37 for Siril 1.4.0-beta2, nowhere near
-# 1.1.x). Enforcing a guessed floor here caused a false rejection on real Siril 1.4.4.
-# The siril.cmd("requires", ...) check below is the one documented, reliable gate; any
-# individual sirilpy method this bridge depends on that turns out to be missing on an
-# older install will raise its own AttributeError/exception at the call site, which is
-# surfaced to the user as an error dialog rather than guessed at up front.
+MINIMUM_SIRIL_VERSION = "1.4.4"
+# Gate on Siril version via siril.cmd("requires", ...). Individual sirilpy method
+# availability is handled gracefully at call sites.
 
 
 class SirilBridgeError(RuntimeError):
@@ -187,18 +180,8 @@ class SirilBridge:
     def get_image_icc_profile(self) -> bytes | None:
         return self._require_connection().get_image_iccprofile()
 
-    def get_display_icc_profile(self) -> bytes | None:
-        return self._require_connection().get_siril_display_iccprofile()
-
     def get_loaded_image_filename(self) -> str | None:
-        """Best-effort: the actual on-disk filename of the currently loaded image, for
-        naming exports after it (per user request: "original image name" rather than
-        the FITS OBJECT header keyword, which is often blank or generic and doesn't
-        reflect the real filename). Unlike this class's other methods, this
-        deliberately swallows *any* failure and returns None rather than raising --
-        RESEARCH.md has no confirmed sirilpy accessor for this, so callers must be able
-        to fall back gracefully if this sirilpy version doesn't expose it under the
-        name this guesses, rather than break image loading entirely over a filename."""
+        """Returns the filename of the loaded image if available."""
         siril = self._require_connection()
         try:
             filename = siril.get_image_filename()
@@ -207,16 +190,7 @@ class SirilBridge:
         return filename or None
 
     def get_technical_metadata(self) -> dict[str, str]:
-        """Best-effort capture-session details (camera, telescope, filter, exposure,
-        etc.) for pre-populating the Info Box overlay's text (gui/main_window.py's
-        _default_info_box_text). RESEARCH.md confirms get_image_keywords() exposes
-        instrume/telescop/focal_length/pixel_size_x/pixel_size_y/date_obs as real
-        FKeywords attributes; filter/exptime/gain are plausible but UNCONFIRMED
-        attribute names on that dataclass, so every read here is individually guarded
-        via getattr and simply omitted if the attribute doesn't exist under this name
-        on this sirilpy version -- same reasoning as get_loaded_image_filename above.
-        Returns an empty dict on any failure rather than raising, since this is purely
-        for pre-filling editable text the user can always type themselves."""
+        """Reads capture-session metadata for the Info Box overlay."""
         siril = self._require_connection()
         try:
             keywords = siril.get_image_keywords()
@@ -234,7 +208,22 @@ class SirilBridge:
 
         focal_length = _first("focal_length")
         pixel_size = _first("pixel_size_x")
-        exposure = _first("exptime", "exposure")
+
+        # Prioritize total integration time (livetime / totalexp) over single sub exposure
+        livetime = _first("livetime", "totalexp")
+        if not livetime:
+            try:
+                hdr = self.get_wcs_header_dict()
+                for key in ("LIVETIME", "TOTALEXP", "TELAPSE"):
+                    if key in hdr and hdr[key]:
+                        try:
+                            livetime = float(hdr[key])
+                            break
+                        except (ValueError, TypeError):
+                            pass
+            except Exception:
+                pass
+        exposure = livetime if livetime else _first("exptime", "exposure")
 
         fields = {
             "Camera": _first("instrume"),
@@ -249,17 +238,5 @@ class SirilBridge:
         return {k: str(v) for k, v in fields.items() if v is not None}
 
     def log(self, message: str) -> None:
-        """Writes a line to Siril's own log/console panel -- distinct from this
-        script's own Python logger, which the user won't see unless Siril was
-        launched from a terminal. This is sirilpy's documented way for a script to
-        surface status text directly inside Siril's UI."""
+        """Writes a line to Siril's log panel."""
         self._require_connection().log(message)
-
-    def show_marker(self, ra: float, dec: float, name: str) -> None:
-        """Fire-and-forget: also draw a marker in Siril's own GUI overlay
-        (RESEARCH.md #8, Option B). Never used as a data source."""
-        siril = self._require_connection()
-        try:
-            siril.cmd("show", str(ra), str(dec), name)
-        except Exception:
-            logger.exception("siril.cmd('show', ...) failed for %s", name)

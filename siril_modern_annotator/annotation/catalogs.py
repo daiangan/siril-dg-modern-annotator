@@ -349,8 +349,8 @@ class LocalCsvProvider(CatalogProvider):
         if not rows:
             return []
 
-        ra = np.array([_safe_float(r.get("ra", "")) or np.nan for r in rows])
-        dec = np.array([_safe_float(r.get("dec", "")) or np.nan for r in rows])
+        ra = np.array([np.nan if (v := _safe_float(r.get("ra", ""))) is None else v for r in rows])
+        dec = np.array([np.nan if (v := _safe_float(r.get("dec", ""))) is None else v for r in rows])
         valid = ~np.isnan(ra) & ~np.isnan(dec)
         if not np.any(valid):
             return []
