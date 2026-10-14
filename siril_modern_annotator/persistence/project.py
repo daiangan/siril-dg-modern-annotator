@@ -63,9 +63,7 @@ class ProjectData:
     annotations: list[Annotation]
     export_settings: ExportSettings
     schema_version: int = SCHEMA_VERSION
-    # Grid/compass start off every fresh session (per user request) and are only ever
-    # persisted per-image, in this same sidecar -- default_factory so an older saved
-    # file (from before this field existed) still loads fine, per load()'s .get() below.
+    # Overlay settings persisted per-image in sidecar; default_factory ensures backward compatibility.
     overlay_settings: OverlaySettings = field(default_factory=OverlaySettings)
 
 

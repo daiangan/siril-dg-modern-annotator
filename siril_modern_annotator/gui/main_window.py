@@ -122,21 +122,12 @@ class CheckableMenu(QMenu):
 # first-time/offline user with no explanation.
 #
 # "user_dso" (Siril's own Astrometry > Annotate > Search Object list) is a second,
-# different kind of exception: whether it should default on isn't a static fact like
-# ONLINE_ONLY_CATALOGS, it depends on how many entries this particular installation's
-# catalogue already has (per user request: on while it's still a short, deliberately
-# curated list, off once it's grown past that). Excluded here and added back
-# conditionally in MainWindow.__init__, which is the earliest point a live bridge
-# connection (needed to read the count) is available.
+# Conditionally include user_dso in defaults if catalogue entry count is small.
 _DEFAULT_CATALOGS = set(SUPPORTED_CATALOGS) - ONLINE_ONLY_CATALOGS - {"user_dso"}
 _USER_DSO_DEFAULT_ON_MAX_ENTRIES = 10
 
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=QKSMSHKZWW7GA"
 
-# Shown in the window title (with __version__ appended) so the user always knows which
-# build they're running -- per user request. Also fixes a stale rename: every other
-# user-facing surface (the Siril log banner, the built script's filename) already says
-# "DG Modern Annotator", but this window title was missed when that rename happened.
 APP_TITLE = "DG Modern Annotator"
 
 
@@ -212,11 +203,7 @@ class MainWindow(QMainWindow):
         self._pending_item_cleanup: list[list[object]] = []
         self.selected_id: str | None = None
 
-        # Placeholder only -- _load_current_image() immediately replaces this with
-        # presets.default_overlay_settings_for_image() (resolution-scaled sizing) plus
-        # last_used_store.apply_last_used_overlay_settings() (restored on/off state and
-        # non-size-dependent style, per user request). Also persisted per-image in a
-        # saved project file (see persistence/project.py).
+        # Initial placeholder overlay settings, populated on image load.
         self.overlay_settings = OverlaySettings()
         self.grid_item: GridItem | None = None
         self.compass_item: CompassItem | None = None
@@ -378,12 +365,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(overlays_btn)
         toolbar.addSeparator()
 
-        # Auto Arrange Labels / Save Layout / Load Layout moved to the "Tools" dock tab
-        # (see gui/tools_panel.py) -- per user request, to keep this toolbar simple.
-
-        # Per user request: ordered last (Export), with a
-        # distinct accent color so the primary "finish and save your work" action still
-        # stands out from the neutral gray toolbar buttons around it.
         export_btn = QPushButton("Export")
         export_btn.clicked.connect(self.open_export_dialog)
         export_btn.setStyleSheet(
@@ -488,34 +469,18 @@ class MainWindow(QMainWindow):
             self.overlay_settings = preset_store.default_overlay_settings_for_image(
                 self.image_info.width, self.image_info.height
             )
-            # On/off state and non-size-dependent style (color, opacity, label
-            # positions, corner) DO carry over across sessions, per user request --
-            # see apply_last_used_overlay_settings's own docstring for exactly which
-            # fields that is and why the rest is deliberately excluded.
             self.overlay_settings = last_used_store.apply_last_used_overlay_settings(self.overlay_settings)
             self.overlay_settings.info_box.text = self._default_info_box_text()
             self._setup_overlay_items()
             self._sync_overlay_action_checks()
             self.style_panel.set_overlay_settings(self.overlay_settings)
-            # Prefer the actual loaded filename over the FITS OBJECT keyword -- per
-            # user request, exports should be named after "the original image name",
-            # and OBJECT is frequently blank/generic rather than reflecting the real
-            # file on disk. get_loaded_image_filename() is a best-effort call (see its
-            # own docstring) that returns None if unavailable, so this still falls back
-            # to the previous OBJECT-based behavior exactly as before when it can't.
+            # Prefer the actual loaded filename over the FITS OBJECT keyword.
             loaded_filename = self.bridge.get_loaded_image_filename()
             self.source_identifier = (
                 Path(loaded_filename).stem if loaded_filename else (self.image_info.object_name or "untitled")
             )
 
-            # Marker/label geometry is native-pixel-space, so a
-            # flat default size looks fine at one resolution and is nearly invisible at
-            # another -- confirmed by real-world testing. Scale the starting style to
-            # this image's actual resolution instead of using a fixed constant. Skip
-            # this when the user already has a persisted last-used style, though: most
-            # markers scale off each object's angular size at render time regardless
-            # (renderer.py's size_from_angular_size), and per user request the starting
-            # style should be "what I used last time", not a re-derived default.
+            # Scale starting style to image resolution if no saved style exists.
             if not self._has_saved_style:
                 self.global_style_holder[0] = preset_store.default_preset_for_image(
                     self.image_info.width, self.image_info.height
@@ -1514,11 +1479,7 @@ class MainWindow(QMainWindow):
         # run_auto_arrange() pushes its own command, which becomes a child of this
         # macro since it's still open when that runs.
         #
-        # Custom objects (catalog == "user") are skipped here -- per user request.
-        # They have no independent catalog/WCS position to reset *to*: wherever the
-        # user placed one *is* its position, same as image_x/image_y itself is just
-        # wherever they right-clicked when creating it (see _add_custom_object), not
-        # a verified astrometric source position the way a real catalog object's is.
+        # Custom objects (catalog == "user") have no catalog position to reset to.
         if not self.annotations:
             return
         self.undo_stack.beginMacro("Reset Layout")

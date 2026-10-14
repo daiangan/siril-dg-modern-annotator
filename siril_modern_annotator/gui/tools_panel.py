@@ -1,8 +1,4 @@
-"""Tools dock tab: houses actions that used to live directly on the main toolbar
-(Auto Arrange Labels, Save/Load Layout) -- per user request, to keep the toolbar itself
-simple. Deliberately its own tab (not folded into Objects or Style) so more tools have
-an obvious home later without the toolbar growing again.
-"""
+"""Tools dock tab: houses secondary actions (Auto Arrange Labels, Save/Load Layout)."""
 
 from __future__ import annotations
 

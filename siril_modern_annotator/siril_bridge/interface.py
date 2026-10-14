@@ -51,9 +51,7 @@ def _format_pixel_size(value) -> str:
 
 
 def _format_exposure(value) -> str:
-    """Seconds -> the smallest unit that reads naturally, per user request: under a
-    minute stays in seconds, under an hour becomes minutes, an hour or more becomes
-    hours -- seconds/minutes are whole numbers, hours keep one decimal place."""
+    """Formats seconds into readable unit (s, m, or h)."""
     seconds = float(value)
     if seconds < 60:
         return f"{round(seconds)} s"

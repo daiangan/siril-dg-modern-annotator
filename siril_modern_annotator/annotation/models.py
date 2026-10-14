@@ -68,10 +68,7 @@ class LabelStyle:
     italic: bool = False
     text_color: str = "#f2f2f2"
     background_mode: BackgroundMode = BackgroundMode.TRANSLUCENT
-    # None = "match this object's catalog color" (the new default, per user request) --
-    # an explicit hex string is a deliberate override and always wins. Resolved to a
-    # concrete color in annotation.renderer.compute_label_geometry, the single place
-    # both the interactive canvas and the exporter read it from.
+    # None inherits catalog color; an explicit hex string is an override.
     background_color: str | None = None
     background_opacity: float = 0.55
     padding: float = 4.0
@@ -99,7 +96,7 @@ class GridStyle:
     unlike MarkerStyle/LabelStyle this has no per-object override concept and lives
     directly on OverlaySettings rather than StylePreset."""
 
-    enabled: bool = False  # off by default -- per user request, shown only if asked for
+    enabled: bool = False  # Disabled by default
     color: str = "#66AADD"
     opacity: float = 0.6
     line_width: float = 1.0

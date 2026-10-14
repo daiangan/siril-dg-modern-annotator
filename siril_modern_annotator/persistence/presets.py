@@ -33,12 +33,7 @@ _USER_PRESETS_KEY = "user_style_presets"
 
 
 def _builtin_presets() -> dict[str, StylePreset]:
-    # Only the default preset ships built-in now -- the other four (Scientific,
-    # Outreach, Social Media, Print) were removed per user request after "Scientific"'s
-    # much smaller flat radius/font-size left them with a field of tiny, hard-to-read
-    # markers and no quick way back to a sane default (see reset_style_btn in
-    # style_panel.py, which now handles "go back to default" instead of relying on
-    # re-selecting a preset). Users can still build and save their own via "Save As…".
+    # Minimal Modern ships as the default built-in preset; custom presets can be created via "Save As…".
     return {
         "Minimal Modern": StylePreset(
             name="Minimal Modern",
@@ -103,23 +98,11 @@ def default_preset_for_image(width: int, height: int) -> StylePreset:
     )
 
 
-# Unlike the object-label font size above (deliberately flat -- see the comment on
-# that), grid/compass label text has no background box behind it and reads as either
-# "fine" or "invisible" depending on how it scales with the frame -- per a real
-# report, the flat 11-13pt default was unreadable on a large image. Proportional to
-# the shorter image dimension so it stays legible at "fit to window" zoom regardless
-# of native resolution, floored so a small image doesn't get illegibly tiny text either.
+# Grid/compass label text and line strokes scale with the shorter image dimension
+# to maintain legibility at fit-to-window zoom across varying native resolutions.
 _OVERLAY_LABEL_FRACTION = 0.015
 _OVERLAY_LABEL_MIN_PT = 14.0
 
-# Same problem as the label font size, for the grid's and compass's own line strokes:
-# line_width is native-pixel-space (GridItem.paint/CompassItem.paint draw directly in
-# scene/native coordinates), so a flat width that looks fine on a modest image becomes
-# a near-invisible hairline once the image's native resolution climbs into the tens of
-# megapixels -- per user report. Same fraction for both so they read as the same visual
-# weight; each floored at its own flat dataclass default so a small image doesn't get
-# an oversized line, and so the compass (originally 1.6px, vs. the grid's 1.0px) keeps
-# its slightly heavier look at low resolution too.
 _OVERLAY_LINE_WIDTH_FRACTION = 0.0008
 _GRID_LINE_WIDTH_MIN_PX = 1.0
 _COMPASS_LINE_WIDTH_MIN_PX = 1.6

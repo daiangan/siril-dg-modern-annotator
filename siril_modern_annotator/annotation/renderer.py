@@ -456,9 +456,7 @@ def _format_ra_sexagesimal(ra_deg: float) -> str:
 
 
 def _format_dec_sexagesimal(dec_deg: float) -> str:
-    """Matches _format_ra_sexagesimal's minutes-only precision. Plain apostrophe for
-    arcminutes ("+41°30'"), not the typographic prime (′) the RA formatter's seconds
-    variant used to pair with -- simpler, per user request/example."""
+    """Matches _format_ra_sexagesimal's minutes-only precision ("+41°30'")."""
     sign = "-" if dec_deg < 0 else "+"
     dec_deg = abs(dec_deg)
     d = int(dec_deg)
@@ -531,9 +529,7 @@ def _clip_polyline_to_frame(
 
 
 _GRID_LABEL_MARGIN_PX = 6.0
-# How close a label's near edge should sit to its grid line -- per user request,
-# noticeably closer than dead-centered-on-the-line (the previous behavior), matching
-# Siril's own look of text running right along each line.
+# Spacing between label edge and grid line.
 GRID_LABEL_LINE_GAP_PX = 2.0
 
 
@@ -644,9 +640,8 @@ def place_grid_label_point(
     frame_width: float, frame_height: float,
     gap: float = GRID_LABEL_LINE_GAP_PX, margin: float = _GRID_LABEL_MARGIN_PX,
 ) -> Point:
-    """Where a grid label's text should actually be centered when drawn: close to its
-    line -- GRID_LABEL_LINE_GAP_PX from it, not dead-centered on it (per user request)
-    -- while never overhanging the frame.
+    """Computes the center point for drawing a grid label adjacent to its line while
+    ensuring it remains within the image frame.
 
     (x, y) is a real point *on* the line. This first nudges perpendicular to the line
     by grid_label_perpendicular_offset (same distance for every label, since it only
@@ -753,7 +748,7 @@ def compute_grid_geometry(wcs: SirilWcs, style: GridStyle) -> GridGeometry:
 # ------------------------------------------------------------------ compass ----
 
 _COMPASS_ANGULAR_DELTA_DEG = 0.01
-_COMPASS_DEFAULT_ANCHOR_FRACTION = 0.92  # bottom-right, per user request
+_COMPASS_DEFAULT_ANCHOR_FRACTION = 0.92  # bottom-right anchor default
 
 
 @dataclass(frozen=True)

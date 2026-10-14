@@ -110,14 +110,9 @@ def load_last_used_preview_mode() -> str | None:
     return None
 
 
-# Only the fields below are saved for overlays -- per user request, "settings that do
-# not depend on image size" (on/off, color, opacity, label positions, corner). Left out
-# on purpose: line_width/label_font_size/padding/border_radius/margin (resolution-scaled
-# fresh for each image by presets.default_overlay_settings_for_image -- restoring a flat
-# saved value would defeat that scaling and look wrong on a different-sized image next
-# time), info_box.text (per-image FITS-header content, not a style choice), and
-# anchor_x/anchor_y (a raw native-pixel-space drag position, meaningless on a
-# different-sized image).
+# Only size-independent settings are saved across sessions (on/off, color, opacity,
+# label positions, corner). Size-dependent geometry (line width, font size, margins)
+# is dynamically resolution-scaled for each loaded image.
 
 
 def save_last_used_overlay_settings(settings: OverlaySettings) -> None:

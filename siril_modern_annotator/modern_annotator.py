@@ -46,11 +46,6 @@ def main() -> int:
         )
         return 1
 
-    s.ensure_installed(
-        "PyQt6", "astropy", "astroquery", "Pillow", "tifffile",
-        version_constraints=[">=6.4", ">=5.3", ">=0.4.8", ">=10.1", ">=2021.7"],
-    )
-
     bridge = SirilBridge()
     try:
         bridge.connect()

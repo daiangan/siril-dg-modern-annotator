@@ -352,9 +352,13 @@ def _clean_module(source: str) -> tuple[str, str]:
         doc_lines.update(range(doc_node.lineno, doc_node.end_lineno + 1))
 
     top_import_lines = set()
+    redundant_top_lines = set()
     for stmt in tree.body:
         if isinstance(stmt, (ast.Import, ast.ImportFrom)):
             top_import_lines.update(range(stmt.lineno, stmt.end_lineno + 1))
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            if isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr in ("basicConfig", "filterwarnings"):
+                redundant_top_lines.update(range(stmt.lineno, stmt.end_lineno + 1))
 
     nested_internal_imports: list[ast.ImportFrom] = []
     for node in ast.walk(tree):
@@ -381,7 +385,7 @@ def _clean_module(source: str) -> tuple[str, str]:
 
     filtered_lines: list[str] = []
     for idx, line in enumerate(lines, 1):
-        if idx in doc_lines or idx in top_import_lines:
+        if idx in doc_lines or idx in top_import_lines or idx in redundant_top_lines:
             continue
         filtered_lines.append(line)
 

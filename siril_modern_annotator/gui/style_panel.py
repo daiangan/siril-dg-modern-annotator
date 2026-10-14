@@ -130,21 +130,8 @@ class StyleEditorWidget(QWidget):
         self.marker_stroke = DarkDoubleSpinBox()
         self.marker_stroke.setRange(0.2, 10.0)
         self.marker_stroke.setSingleStep(0.2)
-        # Slider, not a spinbox: per user request, matching Radius X/Y below (Circle/
-        # Brackets' range is far narrower than Ellipse's 2-5000, so no quadratic curve
-        # is needed here -- linear precision across 2-500 is already fine).
         self.marker_radius = LabeledSlider(2.0, 500.0, suffix="px")
-        # Sliders, not spinboxes: per user report, incrementing these via a spinbox's
-        # tiny arrows was uncomfortable, and dragging is the natural interaction for
-        # "adjust this oval until it visually fits the galaxy" anyway. 5000px comfortably
-        # covers a large galaxy's radius in native image pixel space on a real
-        # high-resolution astrophotography frame -- the previous 500 cap (copied from
-        # the circular Radius field above) left a real M31 ellipse unable to reach the
-        # galaxy's actual extent, per a real report with a screenshot.
-        # quadratic: concentrates drag precision at the low end (2-500ish px, where
-        # most objects actually fall) while still reaching 5000px within one drag --
-        # per a real report that a plain linear mapping across this wide a range was
-        # too sensitive for the small adjustments needed to actually fit an oval.
+        # Quadratic curve concentrates precision at the low end (2-500px) while reaching up to 5000px.
         self.marker_radius_x = LabeledSlider(2.0, 5000.0, suffix="px", curve="quadratic")
         self.marker_radius_y = LabeledSlider(2.0, 5000.0, suffix="px", curve="quadratic")
         # -90..90, not -180..180: a rotated ellipse is visually identical every 180
@@ -193,10 +180,7 @@ class StyleEditorWidget(QWidget):
         for mode in BackgroundMode:
             self.background_mode.addItem(mode.value.capitalize(), mode)
         self.background_color = ColorButton("#101015")
-        # Default per user request: label backgrounds match their catalog's color
-        # unless a custom color is explicitly chosen (mirrors marker/connector
-        # precedence -- see renderer.compute_label_geometry). Unchecking reveals the
-        # color button below it for a manual override.
+        # Label backgrounds match their catalog's color by default unless overridden.
         self.background_color_inherit_check = QCheckBox("Match catalog color")
         self.background_color_inherit_check.setChecked(True)
         self.background_color.setEnabled(False)
@@ -504,10 +488,7 @@ class StylePanel(QWidget):
         self.grid_line_width.setSingleStep(0.2)
         self.grid_show_labels = QCheckBox("Show coordinate labels")
         self.grid_show_labels.setChecked(True)
-        # Range tops out well above the plain 6-24 an object label's font size uses --
-        # per user request, this is now resolution-scaled (see
-        # persistence/presets.py's default_overlay_settings_for_image) and can
-        # legitimately land north of 100pt on a large image.
+        # Resolution-scaled font range up to 200pt for large image dimensions.
         self.grid_label_size = DarkDoubleSpinBox()
         self.grid_label_size.setRange(6.0, 200.0)
         self.grid_ra_position = QComboBox()
@@ -815,13 +796,7 @@ class StylePanel(QWidget):
             self.reset_position_btn.setVisible(False)
             return
         self.reset_position_btn.setVisible(annotation.marker_x is not None)
-        # Pre-fill with the object's actual current name as real, editable text (not
-        # placeholder text) -- per user request, so starting to type adds to/edits the
-        # existing name in place instead of the field looking pre-filled but actually
-        # being empty, which silently discarded the original name the moment you typed
-        # anything. blockSignals still guards against merely *selecting* an object
-        # committing this text as a custom_display_name override on its own; only an
-        # actual edit (any keystroke, via _on_object_meta_edited) commits it.
+        # Pre-fill with the object's current display name as editable text.
         name_mode = self._global_style.label_style.name_display if self._global_style else NameDisplayMode.CATALOG_ONLY
         self.custom_name_edit.blockSignals(True)
         self.custom_name_edit.setPlainText(annotation.custom_display_name or annotation.display_name(name_mode))
