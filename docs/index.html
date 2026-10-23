@@ -1165,13 +1165,12 @@
 <section id="get-started">
   <div class="getstarted">
     <div class="getstarted-copy">
-      <div class="eyebrow">Get started</div>
+      <div class="eyebrow">Install from inside Siril</div>
       <h2>Now part of Siril&rsquo;s official scripts.</h2>
       <p>
         DG Modern Annotator is published in the official Siril scripts repository, so you
-        can install it straight from Siril &mdash; no manual download needed.
-        Everything else &mdash; PyQt6, astropy, astroquery &mdash; installs itself into
-        Siril&rsquo;s own Python environment the first time you run it.
+        can install and update it straight from Siril &mdash; no manual download needed.
+        It&rsquo;s a handful of clicks in the Preferences window.
       </p>
       <div class="getstarted-actions">
         <a class="btn btn-primary" href="https://github.com/daiangan/siril-dg-modern-annotator#readme">Read the docs</a>
@@ -1179,10 +1178,12 @@
       </div>
     </div>
     <ul class="req-list">
-      <li><span class="req-num">01</span><span><strong>Siril 1.4.4+</strong>, with a plate-solved image loaded.</span></li>
-      <li><span class="req-num">02</span><span>Open <strong>Preferences &rarr; Scripts</strong>, enable the online scripts repository, search for <code>DG_Modern_Annotator</code> and tick it (or use <strong>Scripts &rarr; Get Scripts</strong>).</span></li>
-      <li><span class="req-num">03</span><span>Find it under <strong>Scripts &rarr; Python Scripts &rarr; Utility &rarr; DG_Modern_Annotator.py</strong>.</span></li>
-      <li><span class="req-num">04</span><span>Run it on any plate-solved image &mdash; dependencies install themselves on first use. Prefer a manual install? Grab the file from the <a href="https://github.com/daiangan/siril-dg-modern-annotator/releases/latest">latest release</a>.</span></li>
+      <li><span class="req-num">01</span><span><strong>Siril 1.4.4+</strong>, with the online scripts repository enabled: open <strong>Preferences &rarr; Scripts</strong> and tick <strong>Enable use of the siril-scripts online repository</strong>.</span></li>
+      <li><span class="req-num">02</span><span>In the same panel, type <code>dg</code> or <code>DG_Modern_Annotator</code> in the search box. It is listed under the <strong>Utility</strong> category as a Python script. If it doesn&rsquo;t show up yet, click <strong>Manual update</strong> to refresh the list.</span></li>
+      <li><span class="req-num">03</span><span>Tick the box in the <strong>Sel</strong> column, then click <strong>Apply</strong>. Siril downloads and installs the script for you.</span></li>
+      <li><span class="req-num">04</span><span>Open it from <strong>Scripts &rarr; Python Scripts &rarr; Utility &rarr; DG_Modern_Annotator.py</strong>. (<strong>Scripts &rarr; Get Scripts</strong> opens the same repository browser.)</span></li>
+      <li><span class="req-num">05</span><span>Load a plate-solved image and run it. PyQt6, astropy and astroquery install themselves on first use, so the first launch takes a little longer.</span></li>
+      <li><span class="req-num">06</span><span>Keep <strong>Automatic updates</strong> ticked in the same panel and Siril will pick up new versions as they&rsquo;re published. Prefer a manual install? Grab the file from the <a href="https://github.com/daiangan/siril-dg-modern-annotator/releases/latest">latest release</a> and drop it in your Scripts folder.</span></li>
     </ul>
   </div>
 </section>
